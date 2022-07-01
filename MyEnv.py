@@ -44,6 +44,8 @@ class MyEnv(L2M2019Env):
             self.tgt_field_queue.append(tgt_field)
             self.body_vector_queue.append(body_vector)
             self.actions_queue.append(np.full((22), 0.05))
+        tgt_field, body_vector = self.flatten_queues()
+        return tgt_field, body_vector
 
     def step(self, action, project=True, obs_as_dict=True):
         obs, reward, done, info = super(MyEnv, self).step(action, project=project, obs_as_dict=obs_as_dict)
