@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from replay_buffer import ReplayBuffer
+from Trainers.DDPGTrainManager.replay_buffer import ReplayBuffer
 
 critic_lr = 0.0002
 actor_lr = 0.0001

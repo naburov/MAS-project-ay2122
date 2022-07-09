@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 
-from replay_buffer import VECTOR_OBS_LEN
+from .replay_buffer import VECTOR_OBS_LEN
 
 NUM_ACTIONS = 22
 
