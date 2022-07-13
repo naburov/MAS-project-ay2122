@@ -13,13 +13,6 @@ rank = comm.Get_rank()
 
 env = None
 data = None
-memory_size = 8
-tau = 0.01
-std_dev = 0.2
-batch_size = 1024
-buf_capacity = int(5e4)
-checkpoint_dir = r'C:\Users\nikita.burov\Projects\mas-project-burov-ay2122\checkpoints'
-buffer_path = r'C:\Users\nikita.burov\Projects\mas-project-burov-ay2122\buf.pckl'
 
 if rank == 0:
     import tensorflow as tf
@@ -36,7 +29,7 @@ if rank == 0:
             # Memory growth must be set before GPUs have been initialized
             print(e)
 
-    manager = DDPGTrainManager(checkpoint_dir, buffer_path, memory_size, buf_capacity)
+    manager = DDPGTrainManager(MODEL_CHECKPOINT_DIR, BUFFER_CHECKPOINT_DIR, ENV_MEMORY_SIZE, BUFFER_CAPACITY)
     logger = Logger()
     for epoch in range(EPOCHS):
         for num_episode in range(EPISODES_PER_EPOCH):
@@ -79,7 +72,7 @@ if rank == 0:
                     cont_env.remove(r)
             print('Finished episode ', num_episode)
             avg = statistics.mean(rewards)
-            logger.log2txt('reward_logs.txt',
+            logger.log2txt(REWARD_LOGS_PATH,
                            'Epoch: {0}, Ep n: {1}, Avg rew: {2}'.format(epoch, num_episode, avg))
 
             manager.train_step()
@@ -91,7 +84,7 @@ else:
     while True:
         data = comm.recv(source=0, tag=11)
         if data == 0:
-            env = MyEnv(visualize=False, memory_size=memory_size)
+            env = MyEnv(visualize=False, memory_size=ENV_MEMORY_SIZE)
             observation = env.reset()
             comm.send({
                 'obs': observation,

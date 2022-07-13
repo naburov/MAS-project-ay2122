@@ -1,0 +1,48 @@
+FROM tensorflow/tensorflow:2.3.0-gpu
+
+RUN apt-get --yes install wget
+RUN apt-key del A4B469963BF863CC
+RUN apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub
+
+RUN apt-get --yes -qq update --allow-insecure-repositories \
+ && apt-get --yes -qq upgrade \
+ && apt-get --yes -qq install \
+                      bzip2 \
+                      cmake \
+                      cpio \
+                      curl \
+                      g++ \
+                      gcc \
+                      gfortran \
+                      git \
+                      gosu \
+                      libblas-dev \
+                      liblapack-dev \
+                      libopenmpi-dev \
+                      openmpi-bin \
+                      virtualenv \
+                      wget \
+                      zlib1g-dev
+
+ENV CONDA_DIR /opt/conda
+COPY ./Anaconda3-5.3.1-Linux-x86_64.sh "~/Anaconda3-5.3.1-Linux-x86_64.sh"
+RUN /bin/bash "~/Anaconda3-5.3.1-Linux-x86_64.sh" -b -p /opt/conda
+
+# Put conda in path so we can use conda activate
+ENV PATH=$CONDA_DIR/bin:$PATH
+
+RUN mkdir -p /app
+RUN mkdir -p /app/mas-project-burov-ay2122
+RUN mkdir -p /app/mas-project-burov-ay2122/Trainers
+
+COPY ./environment.yml "/app/mas-project-burov-ay2122"
+COPY ./rnts.txt "/app/mas-project-burov-ay2122"
+
+WORKDIR "/app/mas-project-burov-ay2122"
+RUN conda env create -f environment.yml
+RUN source activate opensim-rl
+RUN pip install --upgrade pip
+
+#RUN pip install -r rnts.txt
+
+
