@@ -1,4 +1,4 @@
-from Trainers.Dreamer.models import RSSM, DenseDecoder, ActionDecoder, DenseEncoder
+from Trainers.Dreamer.models import RSSM, DenseDecoder, ActionDecoder, DenseEncoder, State
 import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
@@ -6,12 +6,13 @@ hidden = 200
 determ = 200
 stoch = 200
 units = 100
+num_actions = 22
 obs_shape = (585,)
 rssm_checkpoint_dir = ''
 kl_scale = 0.01
 free_nats = 3.0
 gamma = 0.99
-lambd = 0.95
+lambda_ = 0.95
 
 
 def get_feat(stoch, deter):
@@ -38,20 +39,31 @@ class Dreamer:
         self.encoder_opt = tf.keras.optimizers.Adam()
         self.decoder_opt = tf.keras.optimizers.Adam()
 
+    @tf.function
+    def policy(self, observations: tf.Tensor, state: State, prev_action: tf.Tensor):
+        if state is None:
+            latent = self.dynamics_model.initial_state(observations.shape[0])
+            action = tf.zeros(shape=(observations.shape[0], num_actions))
+        else:
+            latent = state
+            action = prev_action
+        embedding = self.encoder(observations)
+        _, post = self.dynamics_model.posterior(latent, action, embedding)
+        features = get_feat(post.stoch, post.deter)
+        action = self.action_model(features).mode()
+        action = tf.clip_by_value(tfd.Normal(action, 0.1).sample(), -1, 1)
+        return action, post
+
     def train_step(self, observations, actions, rewards):
         with tf.GradientTape() as model_tape:
             embed = self.encoder(observations)
-            post, prior = self.dynamics_model.observe(embed, actions)
+            prior, post = self.dynamics_model.observe(embed, actions, state=None)
             feat = get_feat(post.stoch, post.deter)
             image_pred = self.decoder_model(feat)
             reward_pred = self.reward_model(feat)
             image_prob = tf.reduce_mean(image_pred.log_prob(observations))
             reward_prob = tf.reduce_mean(reward_pred.log_prob(rewards))
-            if self._c.pcont:
-                pcont_pred = self._pcont(feat)
-                pcont_target = self._c.discount * data['discount']
-                likes.pcont = tf.reduce_mean(pcont_pred.log_prob(pcont_target))
-                likes.pcont *= self._c.pcont_scale
+
             prior_dist = get_dist(prior.stoch, prior.deter)
             post_dist = get_dist(post.stoch, post.deter)
             div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
@@ -64,16 +76,12 @@ class Dreamer:
         self.encoder.backward(self.encoder_opt, model_tape, model_loss)
 
         with tf.GradientTape() as actor_tape:
-            imag_feat = self._imagine_ahead(post)
-            reward = self._reward(imag_feat).mode()
-            if self._c.pcont:
-                pcont = self._pcont(imag_feat).mean()
-            else:
-                pcont = self._c.discount * tf.ones_like(reward)
+            imag_feat = self.imagine_ahead(post)
+            reward = self.reward_model(imag_feat).mode()
+
+            pcont = gamma * tf.ones_like(reward)
             value = self.value_model(imag_feat).mode()
-            returns = tools.lambda_return(
-                reward[:-1], value[:-1], pcont[:-1],
-                bootstrap=value[-1], lambda_=self._c.disclam, axis=0)
+            returns = self.estimate_return(reward, value)
             discount = tf.stop_gradient(tf.math.cumprod(tf.concat(
                 [tf.ones_like(pcont[:1]), pcont[:-2]], 0), 0))
             actor_loss = -tf.reduce_mean(discount * returns)
@@ -83,7 +91,20 @@ class Dreamer:
             value_pred = self.value_model(imag_feat)[:-1]
             target = tf.stop_gradient(returns)
             value_loss = -tf.reduce_mean(discount * value_pred.log_prob(target))
-        self.value_model.backward(self.value_opt, model_tape, value_loss)
+        self.value_model.backward(self.value_opt, value_tape, value_loss)
+
+    def imagine_ahead(self, post) -> tf.Tensor:
+        return None
 
     def save_state(self):
         pass
+
+    def estimate_single_return(self, reward, value):
+        discount = tf.stack([gamma * tf.ones_like(reward) for i in range(reward.shape[-1])])
+        discount = tf.math.cumprod(discount, axis=-1)
+        discounted_rewards = tf.multiply(discount, reward)
+        discounted_values = tf.multiply(discount * gamma, value)
+        return discounted_values + discounted_rewards
+
+    def estimate_return(self, reward, value):
+        return None
