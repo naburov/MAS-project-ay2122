@@ -1,4 +1,4 @@
-FROM mas-project-burov-ay2122-base
+FROM naburov/mas-project-burov-ay2122-base
 
 WORKDIR "/app/mas-project-burov-ay2122"
 COPY ./MyEnv.py "/app/mas-project-burov-ay2122"
