@@ -7,7 +7,7 @@ VECTOR_OBS_LEN = 119
 NUM_ACTIONS = 22
 
 
-class ReplayBuffer:
+class SimpleReplayBuffer:
     def __init__(self, capacity, env_memory_size):
         self.capacity = capacity
         self.counter = 0

@@ -41,6 +41,9 @@ class SampleDist:
         logprob = self.log_prob(sample)
         return -tf.reduce_mean(logprob, 0)
 
+    def sample(self):
+        return self._dist.sample(self._samples)
+
 
 class ActionDecoder:
     def __init__(self, inp, size, units, act=tf.nn.elu,
@@ -77,14 +80,31 @@ class ActionDecoder:
         return dist
 
 
-class DenseEncoder(object):
-    def __init__(self, obs_shape, emb_size, units):
-        self.model = tf.keras.models.Sequential([
-            tfkl.Input(shape=obs_shape),
-            tfkl.Dense(units, tf.nn.elu),
-            tfkl.Dense(units, tf.nn.elu),
-            tfkl.Dense(emb_size)
-        ])
+class Encoder(object):
+    def get_model(self, env_memory_size, units, conv_filters, out_size):
+        tgt_inputs = tf.keras.Input(shape=(11, 11, 2 * env_memory_size))
+        vector_input = tf.keras.Input(shape=(22 * env_memory_size,))
+
+        conv_branch = tf.keras.layers.Conv2D(conv_filters, 3, strides=1, padding='same', activation='linear')(
+            tgt_inputs)
+        conv_branch = tf.keras.layers.Conv2D(conv_filters, 3, strides=1, padding='same')(conv_branch)
+        conv_branch = tf.keras.layers.LeakyReLU()(conv_branch)
+        conv_branch = tf.keras.layers.Conv2D(conv_filters, 3, strides=1, padding='same')(conv_branch)
+        conv_branch = tf.keras.layers.LeakyReLU()(conv_branch)
+        conv_vector = tf.keras.layers.GlobalAveragePooling2D()(conv_branch)
+
+        x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(vector_input)
+        x = tf.keras.layers.LeakyReLU()(x)
+        x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(x)
+        x = tf.keras.layers.LeakyReLU()(x)
+        x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(x)
+        concated = tf.keras.layers.Concatenate()([x, conv_vector])
+
+        out = tf.keras.layers.Dense(out_size, activation='sigmoid')(concated)
+        return tf.keras.Model(inputs=[tgt_inputs, vector_input], outputs=out)
+
+    def __init__(self, env_memory_size, emb_size, units, conv_filters):
+        self.model = self.get_model(env_memory_size, units, conv_filters, emb_size)
 
     def backward(self, optimizer: tf.keras.optimizers.Optimizer, tape: tf.GradientTape, loss):
         grads = tape.gradient(loss, self.model.trainable_weights)

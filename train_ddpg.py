@@ -29,7 +29,12 @@ if rank == 0:
             # Memory growth must be set before GPUs have been initialized
             print(e)
 
-    manager = DDPGTrainManager(MODEL_CHECKPOINT_DIR, BUFFER_CHECKPOINT_DIR, ENV_MEMORY_SIZE, BUFFER_CAPACITY)
+    manager = DDPGTrainManager(checkpoint_dir=MODEL_CHECKPOINT_DIR,
+                               buffer_path=BUFFER_CHECKPOINT_DIR,
+                               memory_size=ENV_MEMORY_SIZE,
+                               buffer_capacity=BUFFER_CAPACITY,
+                               num_ranks=total_ranks,
+                               batch_size=BATCH_SIZE)
     logger = Logger()
     for epoch in range(EPOCHS):
         for num_episode in range(EPISODES_PER_EPOCH):
@@ -63,7 +68,7 @@ if rank == 0:
                     observations[cont_env[i] - 1] = data['obs']
                     rewards[cont_env[i] - 1] += data['r']
                     manager.append_observations(
-                        (*old_observations[cont_env[i] - 1], data['r'], *data['obs'], actions[i]))
+                        (*old_observations[cont_env[i] - 1], data['r'], *data['obs'], actions[i]), data['info'])
 
                     if data['done']:
                         ranks2del.append(cont_env[i])
@@ -90,7 +95,7 @@ else:
                 'obs': observation,
                 'r': 0,
                 'done': False,
-                'info': {}
+                'info': {'rank': rank}
             }, dest=0, tag=11)
         elif data == 1:
             action = np.empty(22, dtype=np.float)
@@ -100,7 +105,7 @@ else:
                 'obs': observation,
                 'r': reward,
                 'done': done,
-                'info': {}
+                'info': {'rank': rank}
             }, dest=0, tag=11)
         elif data == 2:
             break
