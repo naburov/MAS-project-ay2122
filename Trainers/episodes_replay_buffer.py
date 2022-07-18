@@ -9,11 +9,11 @@ NUM_ACTIONS = 22
 
 class EpisodeReplayBuffer:
     def __init__(self, seq_capacity, num_ranks, env_memory_size):
-        self.sequences = []
-        self.capacity = ((seq_capacity // num_ranks) + 1) * num_ranks
+        self.sequences = [None] * (num_ranks - 1)
+        self.capacity = (seq_capacity // num_ranks) * num_ranks
         self.seq_counter = 0
         self.num_sequences = 0
-        self.active_indices = [i for i in range(num_ranks)]
+        self.active_indices = [i for i in range(num_ranks - 1)]
         self.env_memory_size = env_memory_size
 
     @property
@@ -22,15 +22,19 @@ class EpisodeReplayBuffer:
 
     def prepare_buffers(self, num_ranks):
         if self.seq_counter == self.capacity:
-            self.active_indices = [i for i in range(num_ranks)]
+            self.active_indices = [i for i in range(num_ranks - 1)]
         else:
-            self.active_indices = [i + num_ranks for i in self.active_indices]
+            self.sequences.extend([None] * (num_ranks - 1))
+            self.active_indices = [i + num_ranks - 1 for i in self.active_indices]
 
-        self.num_sequences += max(0, min(self.num_sequences + num_ranks, len(self.capacity) - 1))
+        self.num_sequences += max(0, min(self.num_sequences + num_ranks - 1, self.capacity - 1))
 
     def append(self, observation, info):
-        print(len(self.sequences), -info['rank'])
-        self.sequences[self.active_indices[-info['rank']]].append(observation)
+        print(len(self.sequences), info['rank'] - 1)
+        if self.sequences[self.active_indices[info['rank'] - 1]] is None:
+            self.sequences[self.active_indices[info['rank'] - 1]] = [observation]
+        else:
+            self.sequences[self.active_indices[info['rank'] - 1]].append(observation)
 
     def sample_sequences(self, num_sequences):
         if num_sequences > self.num_sequences:
