@@ -38,6 +38,7 @@ if rank == 0:
     logger = Logger()
     for epoch in range(EPOCHS):
         for num_episode in range(EPISODES_PER_EPOCH):
+            manager.on_episode_begin(epoch, num_episode)
             # init env
             cont_env = [i for i in range(1, total_ranks)]
 

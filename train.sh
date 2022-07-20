@@ -4,3 +4,4 @@
 source activate opensim-rl
 export OMPI_MCA_btl_vader_single_copy_mechanism=none
 mpirun -np 4 --allow-run-as-root python -m mpi4py train_ddpg.py
+export LD_LIBRARY_PATH=/usr/local/cuda-10.2/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}

@@ -65,15 +65,17 @@ class DDPGTrainManager(TrainManager):
         self.target_actor.save_weights(os.path.join(self.checkpoint_dir, 'target_actor.h5'))
         self.target_critic.save_weights(os.path.join(self.checkpoint_dir, 'target_critic.h5'))
 
+    def on_episode_begin(self, epoch_n, episode_n):
+        self.buf.prepare_buffers(self.num_ranks)
+
     def on_epoch_end(self, epoch_n):
         self.actor_model.save_weights(os.path.join(self.checkpoint_dir, 'actor.h5'))
         self.critic_model.save_weights(os.path.join(self.checkpoint_dir, 'critic_model.h5'))
 
         self.target_actor.save_weights(os.path.join(self.checkpoint_dir, 'target_actor.h5'))
         self.target_critic.save_weights(os.path.join(self.checkpoint_dir, 'target_critic.h5'))
-        self.buf.prepare_buffers(self.num_ranks)
         if epoch_n % 10 == 0:
-            self.buf.save('buf.pckl')
+            self.buf.save(self.buffer_path)
 
     def append_observations(self, data, info):
         self.buf.append(data, info)
