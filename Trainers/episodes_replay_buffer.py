@@ -41,7 +41,7 @@ class EpisodeReplayBuffer:
         if num_sequences > self.num_sequences:
             num_sequences = self.num_sequences
         indices = np.random.choice(min(self.num_sequences, self.capacity), num_sequences)
-        return self.sequences[indices]
+        return [self.sequences[i] for i in indices]
 
     def sample(self, batch_size, convert_to_tf__tensors=True):
         if self.current_len < batch_size:

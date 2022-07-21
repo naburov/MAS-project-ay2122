@@ -1,6 +1,7 @@
+import os
 from typing import Callable
 
-from Trainers.Dreamer.models import RSSM, DenseDecoder, ActionDecoder, DenseEncoder, State, static_scan
+from Trainers.Dreamer.models import RSSM, DenseDecoder, ActionDecoder, EnvEncoder, EnvDecoder, State, static_scan
 import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
@@ -9,13 +10,14 @@ determ = 200
 stoch = 200
 units = 100
 num_actions = 22
-obs_shape = (585,)
-rssm_checkpoint_dir = ''
 kl_scale = 0.01
 free_nats = 3.0
 gamma = 0.99
 lambda_ = 0.95
 horizon = 15
+env_memory_size = 8
+embedding_size = 100
+filters = 64
 
 
 def get_feat(state: State) -> tf.Tensor:
@@ -27,13 +29,26 @@ def get_dist(mean, std):
 
 
 class Dreamer:
-    def __init__(self):
-        self.encoder = DenseEncoder(obs_shape, 200, units)
-        self.dynamics_model = RSSM(stoch, determ, hidden, rssm_checkpoint_dir)
-        self.reward_model = DenseDecoder(400, units, 1)
-        self.value_model = DenseDecoder(400, units, 1)
-        self.decoder_model = DenseDecoder(400, units, 1)
-        self.action_model = ActionDecoder(400, 200, units)
+    def __init__(self, checkpoint_dir):
+        self.encoder = EnvEncoder(env_memory_size, embedding_size, units, filters)
+        print('___________________________')
+        print(self.encoder.model.summary())
+        self.dynamics_model = RSSM(stoch, determ, embedding_size, hidden)
+        print('___________________________')
+        print(self.dynamics_model.prior_model.summary())
+        print(self.dynamics_model.post_model.summary())
+        self.reward_model = DenseDecoder(stoch + determ, units, 1)
+        print('___________________________')
+        print(self.reward_model.model.summary())
+        self.value_model = DenseDecoder(stoch + determ, units, 1)
+        print('___________________________')
+        print(self.value_model.model.summary())
+        self.decoder_model = EnvDecoder(env_memory_size, stoch + determ, units, filters)
+        print('___________________________')
+        print(self.decoder_model.model.summary())
+        self.action_model = ActionDecoder(stoch + determ, num_actions, units)
+        print('___________________________')
+        print(self.action_model.model.summary())
 
         self.action_opt = tf.keras.optimizers.Adam()
         self.value_opt = tf.keras.optimizers.Adam()
@@ -42,11 +57,14 @@ class Dreamer:
         self.encoder_opt = tf.keras.optimizers.Adam()
         self.decoder_opt = tf.keras.optimizers.Adam()
 
+        if len(os.listdir(checkpoint_dir)) > 0:
+            self.load_state(checkpoint_dir)
+
     @tf.function
-    def policy(self, observations: tf.Tensor, state: State, prev_action: tf.Tensor):
+    def policy(self, observations, state: State, prev_action: tf.Tensor):
         if state is None:
-            latent = self.dynamics_model.initial_state(observations.shape[0])
-            action = tf.zeros(shape=(observations.shape[0], num_actions))
+            latent = self.dynamics_model.initial_state(observations[0].shape[0])
+            action = tf.zeros(shape=(observations[0].shape[0], num_actions))
         else:
             latent = state
             action = prev_action
@@ -57,61 +75,100 @@ class Dreamer:
         action = tf.clip_by_value(tfd.Normal(action, 0.1).sample(), -1, 1)
         return action, post
 
-    def train_step(self, observations, actions, rewards):
-        with tf.GradientTape() as model_tape:
-            embed = self.encoder(observations)
-            prior, post = self.dynamics_model.observe(embed, actions, state=None)
-            feat = get_feat(post)
-            image_pred = self.decoder_model(feat)
-            reward_pred = self.reward_model(feat)
-            image_prob = tf.reduce_mean(image_pred.log_prob(observations))
-            reward_prob = tf.reduce_mean(reward_pred.log_prob(rewards))
+    def train_step(self, sequences):
+        with tf.GradientTape(persistent=True) as model_tape:
+            model_loss = 0
+            for s in sequences:
+                observations, actions, rewards = s
+                embed = self.encoder(observations)
+                prior, post = self.dynamics_model.observe(embed, actions, state=None)
+                feat = get_feat(post)
+                vf_pred, v_pred = self.decoder_model(feat)
+                reward_pred = self.reward_model(feat)
+                reconstruction_loss = tf.math.log(
+                    tf.reduce_sum((observations[0] - vf_pred) ** 2) +
+                    tf.reduce_sum((observations[1] - v_pred) ** 2))
+                reward_prob = tf.reduce_mean(reward_pred.log_prob(rewards))
 
-            prior_dist = get_dist(prior.stoch, prior.deter)
-            post_dist = get_dist(post.stoch, post.deter)
-            div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
-            div = tf.maximum(div, free_nats)
-            model_loss = kl_scale * div - sum(image_prob + reward_prob)
+                prior_dist = get_dist(prior.stoch, prior.deter)
+                post_dist = get_dist(post.stoch, post.deter)
+                div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
+                div = tf.maximum(div, free_nats)
+                model_loss += kl_scale * div + reconstruction_loss - reward_prob
 
         self.dynamics_model.backward(self.dynamics_opt, model_tape, model_loss)
         self.decoder_model.backward(self.decoder_opt, model_tape, model_loss)
         self.reward_model.backward(self.reward_opt, model_tape, model_loss)
         self.encoder.backward(self.encoder_opt, model_tape, model_loss)
 
-        with tf.GradientTape() as actor_tape:
-            imag_feat = self.imagine_ahead(post)
-            reward = self.reward_model(imag_feat).mode()
+        del model_tape
 
-            value = self.value_model(imag_feat).mode()
-            v_k_n = self.v_k_n(reward, value)
-            returns = self.estimate_return(
-                v_k_n[..., :-1], v_k_n[..., -1], horizon)
-            actor_loss = -tf.reduce_mean(returns)
+        with tf.GradientTape() as actor_tape:
+            actor_loss = 0
+            for s in sequences:
+                observations, actions, rewards = s
+                embed = self.encoder(observations)
+                prior, post = self.dynamics_model.observe(embed, actions, state=None)
+                imag_feat = self.imagine_ahead(post)
+                reward = self.reward_model(imag_feat).mode()
+
+                value = self.value_model(imag_feat).mode()
+                v_k_n = self.v_k_n(reward, value)
+                returns = self.estimate_return(
+                    v_k_n[..., :-1], v_k_n[..., -1], horizon)
+                actor_loss -= tf.reduce_mean(returns)
         self.action_model.backward(self.action_opt, actor_tape, actor_loss)
 
         with tf.GradientTape() as value_tape:
-            value_pred = self.value_model(imag_feat)[:-1]
-            target = tf.stop_gradient(returns)
-            value_loss = -tf.reduce_mean(value_pred.log_prob(target))
+            value_loss = 0
+            for s in sequences:
+                observations, actions, rewards = s
+                embed = self.encoder(observations)
+                prior, post = self.dynamics_model.observe(embed, actions, state=None)
+                imag_feat = self.imagine_ahead(post)
+                value_pred = self.value_model(imag_feat)[:-1]
+                target = tf.stop_gradient(returns)
+                value_loss -= tf.reduce_mean(value_pred.log_prob(target))
         self.value_model.backward(self.value_opt, value_tape, value_loss)
 
     def imagine_ahead(self, post: State) -> tf.Tensor:
-        fn: Callable[[State], tf.Tensor] = lambda state: self.action_model(
-            tf.stop_gradient(
-                get_feat(state)
-            )).sample()
-        res = static_scan(fn, post, horizon)
-        state = State(
-            mean=tf.stack([p[0].mean for p in res]),
-            std=tf.stack([p[0].std for p in res]),
-            deter=tf.stack([p[0].deter for p in res]),
-            stoch=tf.stack([p[0].stoch for p in res])
+        state = post
+        prior_states = []
+        for t in range(horizon):
+            action = self.action_model(
+                tf.stop_gradient(
+                    get_feat(state)
+                )).mode()
+            prior = self.dynamics_model.prior(prev_state=state,
+                                              prev_action=action)
+            prior_states.append(prior)
+            state = prior
+
+        prior = State(
+            mean=tf.squeeze(tf.stack([p.mean for p in prior_states])),
+            std=tf.squeeze(tf.stack([p.std for p in prior_states])),
+            deter=tf.squeeze(tf.stack([p.deter for p in prior_states])),
+            stoch=tf.squeeze(tf.stack([p.stoch for p in prior_states]))
         )
-        features = get_feat(state)
+
+        features = get_feat(prior)
         return features
 
-    def save_state(self):
-        pass
+    def save_state(self, checkpoint_dir):
+        self.encoder.save(checkpoint_dir, 'encoder')
+        self.dynamics_model.save(checkpoint_dir, 'prior', 'post')
+        self.reward_model.save(checkpoint_dir, 'reward')
+        self.value_model.save(checkpoint_dir, 'value')
+        self.decoder_model.save(checkpoint_dir, 'decoder')
+        self.action_model.save(checkpoint_dir, 'action')
+
+    def load_state(self, checkpoint_dir):
+        self.encoder.load(checkpoint_dir, 'encoder')
+        self.dynamics_model.load(checkpoint_dir, 'prior', 'post')
+        self.reward_model.load(checkpoint_dir, 'reward')
+        self.value_model.load(checkpoint_dir, 'value')
+        self.decoder_model.load(checkpoint_dir, 'decoder')
+        self.action_model.load(checkpoint_dir, 'action')
 
     def v_k_n(self, reward, value) -> tf.Tensor:
         discount = tf.stack([gamma * tf.ones_like(reward) for i in range(reward.shape[-1])])
