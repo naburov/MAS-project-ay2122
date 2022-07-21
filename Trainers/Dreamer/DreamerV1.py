@@ -60,7 +60,7 @@ class Dreamer:
         if len(os.listdir(checkpoint_dir)) > 0:
             self.load_state(checkpoint_dir)
 
-    @tf.function
+    # @tf.function
     def policy(self, observations, state: State, prev_action: tf.Tensor):
         if state is None:
             latent = self.dynamics_model.initial_state(observations[0].shape[0])
@@ -72,7 +72,7 @@ class Dreamer:
         _, post = self.dynamics_model.posterior(latent, action, embedding)
         features = get_feat(post)
         action = self.action_model(features).mode()
-        action = tf.clip_by_value(tfd.Normal(action, 0.1).sample(), -1, 1)
+        action = tf.clip_by_value(tfd.Normal(action, 0.1).sample(), 0, 1)
         return action, post
 
     def train_step(self, sequences):
@@ -114,8 +114,7 @@ class Dreamer:
 
                 value = self.value_model(imag_feat).mode()
                 v_k_n = self.v_k_n(reward, value)
-                returns = self.estimate_return(
-                    v_k_n[..., :-1], v_k_n[..., -1], horizon)
+                returns = self.estimate_return(v_k_n)
                 actor_loss -= tf.reduce_mean(returns)
         self.action_model.backward(self.action_opt, actor_tape, actor_loss)
 
@@ -126,7 +125,10 @@ class Dreamer:
                 embed = self.encoder(observations)
                 prior, post = self.dynamics_model.observe(embed, actions, state=None)
                 imag_feat = self.imagine_ahead(post)
-                value_pred = self.value_model(imag_feat)[:-1]
+                reward = self.reward_model(imag_feat).mode()
+                value_pred = self.value_model(imag_feat)
+                v_k_n = self.v_k_n(reward, value_pred.mode())
+                returns = self.estimate_return(v_k_n)
                 target = tf.stop_gradient(returns)
                 value_loss -= tf.reduce_mean(value_pred.log_prob(target))
         self.value_model.backward(self.value_opt, value_tape, value_loss)
@@ -171,16 +173,16 @@ class Dreamer:
         self.action_model.load(checkpoint_dir, 'action')
 
     def v_k_n(self, reward, value) -> tf.Tensor:
-        discount = tf.stack([gamma * tf.ones_like(reward) for i in range(reward.shape[-1])])
-        discount = tf.math.cumprod(discount, axis=-1)
-        reward = tf.math.cumsum(reward, axis=-1)
+        discount = gamma * tf.ones_like(reward)
+        discount = tf.math.cumprod(discount, axis=0)
+        reward = tf.math.cumsum(reward, axis=0)
         discounted_rewards = tf.multiply(discount, reward)
         discounted_values = tf.multiply(discount * gamma, value)
         return discounted_values + discounted_rewards
 
-    def estimate_return(self, v_k_n: tf.Tensor, v_h_n: tf.Tensor, h: int):
-        discount = gamma * tf.ones_like(v_k_n)
-        discount = tf.math.cumprod(discount, axis=-1)
-        v_k_n = tf.multiply(v_k_n, discount)
-        v_k_n = tf.math.cumsum(v_k_n, axis=-1)[..., -1]
-        return (1 - lambda_) * v_k_n + lambda_ ** (h - 1) * v_h_n
+    def estimate_return(self, v_k_n: tf.Tensor):
+        discount = lambda_ * tf.ones_like(v_k_n)
+        discount = tf.math.cumprod(discount, axis=0)
+        v_k_n = tf.math.cumsum(v_k_n, axis=0)
+        discounted_v_k_n = tf.multiply(discount, v_k_n)
+        return (1 - lambda_) * discounted_v_k_n

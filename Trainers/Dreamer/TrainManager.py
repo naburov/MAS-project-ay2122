@@ -7,9 +7,7 @@ from Trainers.DDPGTrainManager.train_utils import train_step, update_target
 from Trainers.Trainer import TrainManager
 import os
 import numpy as np
-
-tau = 0.01
-std_dev = 0.2
+import tensorflow as tf
 
 
 class DreamerTrainManager(TrainManager):
@@ -18,7 +16,7 @@ class DreamerTrainManager(TrainManager):
         self.dreamer = Dreamer(checkpoint_dir)
         self.checkpoint_dir = checkpoint_dir
         self.buffer_path = buffer_path
-        self.batch_size = 3
+        self.batch_size = batch_size
         self.num_ranks = num_ranks
 
         self.buf = ReplayBuffer(buffer_capacity, num_ranks, memory_size)
@@ -35,7 +33,7 @@ class DreamerTrainManager(TrainManager):
         action, state = self.dreamer.policy((vfs, vs), self.prev_state, self.prev_actions)
         self.prev_actions = action
         self.prev_state = state
-        return action
+        return action.numpy()
 
     def train_step(self):
         # vf, v, r, next_vf, next_v, a = self.buf.sample_sequences(self.batch_size)
@@ -51,6 +49,8 @@ class DreamerTrainManager(TrainManager):
 
     def on_episode_begin(self, epoch_n, episode_n):
         self.buf.prepare_buffers(self.num_ranks)
+        self.prev_actions = None
+        self.prev_state = None
 
     def on_epoch_end(self, epoch_n):
         self.dreamer.save_state(self.checkpoint_dir)

@@ -86,7 +86,7 @@ class ActionDecoder:
             tfkl.Input(shape=(inp,)),
             tfkl.Dense(units, tf.nn.elu),
             tfkl.Dense(units, tf.nn.elu),
-            tfkl.Dense(2 * size)
+            tfkl.Dense(2 * size, activation='sigmoid')
         ])
 
     def backward(self, optimizer: tf.keras.optimizers.Optimizer, tape: tf.GradientTape, loss):
@@ -127,7 +127,8 @@ class EnvDecoder:
         conv_branch = tf.keras.layers.Reshape(target_shape=(11, 11, conv_filters))(conv_branch)
         conv_branch = tf.keras.layers.Conv2D(conv_filters, 1, padding='same')(conv_branch)
         conv_branch = tf.keras.layers.Conv2D(conv_filters, 1, padding='same')(conv_branch)
-        tgt_field_output = tf.keras.layers.Conv2D(2 * env_memory_size, 1, padding='same')(conv_branch)
+        tgt_field_output = tf.keras.layers.Conv2D(2 * env_memory_size, 1, padding='same', activation='linear')(
+            conv_branch)
 
         x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(
             embedding_input)
@@ -135,7 +136,7 @@ class EnvDecoder:
         x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(x)
         x = tf.keras.layers.LeakyReLU()(x)
         x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(x)
-        vector_output = tf.keras.layers.Dense(units=119 * env_memory_size)(x)
+        vector_output = tf.keras.layers.Dense(units=119 * env_memory_size, activation='linear')(x)
 
         return tf.keras.Model(inputs=[embedding_input], outputs=[tgt_field_output, vector_output])
 
@@ -279,7 +280,7 @@ class RSSM:
         x, det_tensor = tfkl.GRUCell(d_size, name='cell')(x, det_inputs)
         x = tfkl.Dense(hid, tf.nn.elu, name='prior1')(x)
         x = tfkl.Dense(hid, tf.nn.elu, name='prior2')(x)
-        x = tfkl.Dense(2 * d_size)(x)
+        x = tfkl.Dense(2 * d_size, activation='sigmoid')(x)
         return tf.keras.Model(inputs=[det_inputs, act_inputs], outputs=[x, det_tensor])
 
     def get_post_model(self, hid, d_size, deter_shape, env_shape) -> tf.keras.Model:
@@ -288,7 +289,7 @@ class RSSM:
         x = tfkl.Concatenate(axis=-1)([prior_inputs, env_inputs])
         x = tfkl.Dense(hid, tf.nn.elu, name='post1')(x)
         x = tfkl.Dense(hid, tf.nn.elu, name='post2')(x)
-        x = tfkl.Dense(2 * d_size)(x)
+        x = tfkl.Dense(2 * d_size, activation='sigmoid')(x)
         return tf.keras.Model(inputs=[prior_inputs, env_inputs], outputs=[x])
 
     def observe(self, embedding, actions, state) -> Tuple[State, State]:

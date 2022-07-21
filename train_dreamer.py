@@ -55,6 +55,9 @@ if rank == 0:
             while len(cont_env) > 0:
                 # make step
                 actions = manager.predict_actions([observations[id - 1] for id in cont_env])
+                if np.isnan(actions).any():
+                    print(actions)
+
                 old_observations = observations
                 observations = [None] * (total_ranks - 1)
 
@@ -63,6 +66,7 @@ if rank == 0:
                     comm.Send([actions[i], MPI.FLOAT], dest=cont_env[i], tag=77)
 
                 ranks2del = []
+                br = False
 
                 for i in range(0, len(cont_env)):
                     data = comm.recv(source=cont_env[i], tag=11)
@@ -72,10 +76,11 @@ if rank == 0:
                         (*old_observations[cont_env[i] - 1], data['r'], *data['obs'], actions[i]), data['info'])
 
                     if data['done']:
-                        ranks2del.append(cont_env[i])
+                        br = True
 
-                for r in ranks2del:
-                    cont_env.remove(r)
+                if br:
+                    break
+
             print('Finished episode ', num_episode)
             avg = statistics.mean(rewards)
             logger.log2txt(REWARD_LOGS_PATH,
@@ -101,6 +106,8 @@ else:
         elif data == 1:
             action = np.empty(22, dtype=np.float)
             comm.Recv([action, MPI.FLOAT], source=0, tag=77)
+            if np.isnan(action).any():
+                print(action)
             observation, reward, done, info = env.step(action)
             comm.send({
                 'obs': observation,
