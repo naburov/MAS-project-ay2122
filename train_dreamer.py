@@ -55,8 +55,6 @@ if rank == 0:
             while len(cont_env) > 0:
                 # make step
                 actions = manager.predict_actions([observations[id - 1] for id in cont_env])
-                if np.isnan(actions).any():
-                    print(actions)
 
                 old_observations = observations
                 observations = [None] * (total_ranks - 1)
@@ -106,8 +104,6 @@ else:
         elif data == 1:
             action = np.empty(22, dtype=np.float)
             comm.Recv([action, MPI.FLOAT], source=0, tag=77)
-            if np.isnan(action).any():
-                print(action)
             observation, reward, done, info = env.step(action)
             comm.send({
                 'obs': observation,

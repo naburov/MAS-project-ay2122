@@ -69,7 +69,7 @@ class SampleDist:
         return -tf.reduce_mean(logprob, 0)
 
     def sample(self):
-        return self._dist.sample(self._samples)
+        return self._dist.sample()
 
 
 class ActionDecoder:
@@ -148,7 +148,15 @@ class EnvDecoder:
         optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
 
     def __call__(self, data: tf.Tensor) -> tf.Tensor:
-        return self.model(data)
+        if len(data.shape) == 3:
+            time_steps = data.shape[0]
+            reshaped_data = tf.reshape(data, (-1, *data.shape[2:]))
+            res = self.model(reshaped_data)
+            res = tf.reshape(res[0], (time_steps, -1, *res[0].shape[1:])), tf.reshape(res[1], (time_steps, -1,
+                                                                                               *res[1].shape[1:]))
+        else:
+            res = self.model(data)
+        return res
 
     def save(self, checkpoint_dir, name):
         self.model.save(
@@ -191,8 +199,15 @@ class EnvEncoder:
         grads = tape.gradient(loss, self.model.trainable_weights)
         optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
 
-    def __call__(self, data: tf.Tensor) -> tf.Tensor:
-        return self.model(data)
+    def __call__(self, data: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
+        if len(data[1].shape) == 3:
+            time_steps = data[0].shape[0]
+            reshaped_data = tf.reshape(data[0], (-1, *data[0].shape[2:])), tf.reshape(data[1], (-1, *data[1].shape[2:]))
+            res = self.model(reshaped_data)
+            res = tf.reshape(res, (time_steps, -1, *res.shape[1:]))
+        else:
+            res = self.model(data)
+        return res
 
     def save(self, checkpoint_dir, name):
         self.model.save(
@@ -215,9 +230,14 @@ class DenseDecoder:
         ])
 
     def __call__(self, features: tf.Tensor) -> tfp.distributions.Distribution:
-        x = features
-        x = self.model(x)
-        return tfd.Independent(tfd.Normal(x, 1), len(()))
+        if len(features.shape) == 3:
+            time_steps = features.shape[0]
+            reshaped_data = tf.reshape(features, (-1, *features.shape[2:]))
+            res = self.model(reshaped_data)
+            res = tf.reshape(res, (time_steps, -1, *res.shape[1:]))
+        else:
+            res = self.model(features)
+        return tfd.Independent(tfd.Normal(res, 1), len(()))
 
     def backward(self, optimizer: tf.keras.optimizers.Optimizer, tape: tf.GradientTape, loss):
         grads = tape.gradient(loss, self.model.trainable_weights)
@@ -280,7 +300,7 @@ class RSSM:
         x, det_tensor = tfkl.GRUCell(d_size, name='cell')(x, det_inputs)
         x = tfkl.Dense(hid, tf.nn.elu, name='prior1')(x)
         x = tfkl.Dense(hid, tf.nn.elu, name='prior2')(x)
-        x = tfkl.Dense(2 * d_size, activation='sigmoid')(x)
+        x = tfkl.Dense(2 * self.s_size, activation='sigmoid')(x)
         return tf.keras.Model(inputs=[det_inputs, act_inputs], outputs=[x, det_tensor])
 
     def get_post_model(self, hid, d_size, deter_shape, env_shape) -> tf.keras.Model:
@@ -292,16 +312,20 @@ class RSSM:
         x = tfkl.Dense(2 * d_size, activation='sigmoid')(x)
         return tf.keras.Model(inputs=[prior_inputs, env_inputs], outputs=[x])
 
-    def observe(self, embedding, actions, state) -> Tuple[State, State]:
+    def observe(self, embedding: tf.Tensor, actions: tf.Tensor, state: State) -> Tuple[State, State]:
+        # shape (time_step, batch_size, dim)
+        assert len(embedding.shape) == 3
+        assert len(actions.shape) == 3
+
         if state is None:
-            state = self.initial_state(1)
+            state = self.initial_state(embedding.shape[1])
 
         prior = []
         post = []
         for t in range(embedding.shape[0]):
             prior_state, posterior_state = self.posterior(prev_state=state,
-                                                          prev_action=actions[t][None, ...],
-                                                          env_embedding=embedding[t][None, ...])
+                                                          prev_action=actions[t],
+                                                          env_embedding=embedding[t])
             prior.append(prior_state)
             post.append(posterior_state)
             state = posterior_state
