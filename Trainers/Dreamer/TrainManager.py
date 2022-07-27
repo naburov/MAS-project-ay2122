@@ -29,15 +29,15 @@ class DreamerTrainManager(TrainManager):
         self.prev_state = None
 
     def predict_actions(self, obss, training):
-        vfs = np.stack([o[0] for o in obss], axis=0)
-        vs = np.stack([o[1] for o in obss], axis=0)
+        vfs = np.stack([o[0] for o in obss], axis=0).astype('float32')
+        vs = np.stack([o[1] for o in obss], axis=0).astype('float32')
         action, state = self.dreamer.policy((vfs, vs), self.prev_state, self.prev_actions, training=training)
         self.prev_actions = action
         self.prev_state = state
-        return action.numpy()
+        return action.numpy().astype('float64')
 
     def train_step(self):
-        seq = self.buf.sample_sequences_tensors(self.batch_size, self.sequence_length)
+        seq = self.buf.sample_sequences_tensors(self.batch_size, self.sequence_length, True)
         return self.dreamer.train_step(observations=(seq[0], seq[1]), rewards=seq[2], actions=seq[-1])
 
     def on_episode_begin(self, epoch_n, episode_n):
