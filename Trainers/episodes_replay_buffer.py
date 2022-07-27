@@ -45,7 +45,7 @@ class EpisodeReplayBuffer:
         indices = np.random.choice(min(self.num_sequences, self.capacity), num_sequences)
         return [self.sequences[i] for i in indices]
 
-    def sample_sequences_tensors(self, num_sequences, n_steps, convert_to_tf__tensors=False):
+    def sample_sequences_tensors(self, num_sequences, n_steps, convert_to_tf_tensors=False):
         vf_state_buffer = np.zeros((n_steps, num_sequences, *TGT_FIELD_SHAPE, self.env_memory_size * 2))
         vector_state_bufffer = np.zeros((n_steps, num_sequences, VECTOR_OBS_LEN * self.env_memory_size))
         action_buffer = np.zeros((n_steps, num_sequences, NUM_ACTIONS))
@@ -69,7 +69,7 @@ class EpisodeReplayBuffer:
                 next_vector_state_bufffer[j - start, i] = o[4]
                 action_buffer[j - start, i] = o[5]
 
-        if not convert_to_tf__tensors:
+        if not convert_to_tf_tensors:
             return (
                 vf_state_buffer,
                 vector_state_bufffer,
