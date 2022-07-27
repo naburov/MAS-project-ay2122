@@ -59,5 +59,5 @@ class MyEnv(L2M2019Env):
     def flatten_queues(self):
         tgt_fields = [f for f in self.tgt_field_queue]
         body_vectors = [f for f in self.body_vector_queue]
-        actions = [f for f in self.actions_queue]
-        return np.concatenate(tgt_fields, axis=-1), np.concatenate((body_vectors + actions), axis=0)
+        # actions = [f for f in self.actions_queue]
+        return np.concatenate(tgt_fields, axis=-1), np.concatenate(body_vectors, axis=0)

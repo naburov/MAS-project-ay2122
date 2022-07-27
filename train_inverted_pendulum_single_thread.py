@@ -71,10 +71,10 @@ for epoch in range(EPOCHS):
     logger.log2txt(REWARD_LOGS_PATH,
                    'Epoch: {0} Avg rew: {1}'.format(epoch, statistics.mean(rewards)))
 
-    # if manager.buf.num_sequences > BATCH_SIZE:
-    #     print('Performing training')
-    #     for i in tqdm(range(train_steps)):
-    #         losses = manager.train_step()
-    #         logger.logDict(LOSSES_LOGS_PATH, losses)
+    if manager.buf.num_sequences > BATCH_SIZE:
+        print('Performing training')
+        for i in tqdm(range(train_steps)):
+            losses = manager.train_step()
+            logger.logDict(LOSSES_LOGS_PATH, losses)
 
     manager.on_epoch_end(epoch)

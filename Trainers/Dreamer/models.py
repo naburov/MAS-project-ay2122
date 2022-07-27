@@ -13,6 +13,7 @@ import numpy as np
 State = namedtuple('State', 'mean std deter stoch')
 
 NUM_ACTIONS = 22
+VECTOR_OBS=97
 
 
 class TanhBijector(tfp.bijectors.Bijector):
@@ -86,7 +87,8 @@ class ActionDecoder:
             tfkl.Input(shape=(inp,)),
             tfkl.Dense(units, tf.nn.elu),
             tfkl.Dense(units, tf.nn.elu),
-            tfkl.Dense(2 * size, activation='sigmoid')
+            tfkl.Dense(units, tf.nn.elu),
+            tfkl.Dense(2 * size)
         ])
 
     def backward(self, optimizer: tf.keras.optimizers.Optimizer, tape: tf.GradientTape, loss):
@@ -120,23 +122,21 @@ class ActionDecoder:
 class EnvDecoder:
     def get_model(self, embedding_size, env_memory_size, units, conv_filters):
         embedding_input = tf.keras.Input(shape=(embedding_size,))
-        e = tf.keras.layers.Dense(units)(embedding_input)
-        conv_branch = tf.keras.layers.Dense(units=(units))(e)
-        conv_branch = tf.keras.layers.Dense(units=(units))(conv_branch)
-        conv_branch = tf.keras.layers.Dense(units=(11 * 11 * conv_filters))(conv_branch)
+        e = tf.keras.layers.Dense(units, activation=tf.nn.relu)(embedding_input)
+        conv_branch = tf.keras.layers.Dense(units=units, activation=tf.nn.relu)(e)
+        conv_branch = tf.keras.layers.Dense(units=units, activation=tf.nn.relu)(conv_branch)
+        conv_branch = tf.keras.layers.Dense(units=11 * 11 * conv_filters, activation=tf.nn.relu)(conv_branch)
         conv_branch = tf.keras.layers.Reshape(target_shape=(11, 11, conv_filters))(conv_branch)
-        conv_branch = tf.keras.layers.Conv2D(conv_filters, 1, padding='same')(conv_branch)
-        conv_branch = tf.keras.layers.Conv2D(conv_filters, 1, padding='same')(conv_branch)
-        tgt_field_output = tf.keras.layers.Conv2D(2 * env_memory_size, 1, padding='same', activation='linear')(
+        conv_branch = tf.keras.layers.Conv2D(conv_filters, 1, padding='same', activation=tf.nn.relu)(conv_branch)
+        conv_branch = tf.keras.layers.Conv2D(conv_filters, 1, padding='same', activation=tf.nn.relu)(conv_branch)
+        tgt_field_output = tf.keras.layers.Conv2D(2 * env_memory_size, 1, padding='same', activation=None)(
             conv_branch)
 
-        x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(
-            embedding_input)
-        x = tf.keras.layers.LeakyReLU()(x)
-        x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(x)
-        x = tf.keras.layers.LeakyReLU()(x)
-        x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(x)
-        vector_output = tf.keras.layers.Dense(units=119 * env_memory_size, activation='linear')(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.relu)(embedding_input)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.relu)(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.relu)(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.relu)(x)
+        vector_output = tf.keras.layers.Dense(units=VECTOR_OBS * env_memory_size)(x)
 
         return tf.keras.Model(inputs=[embedding_input], outputs=[tgt_field_output, vector_output])
 
@@ -147,7 +147,7 @@ class EnvDecoder:
         grads = tape.gradient(loss, self.model.trainable_weights)
         optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
 
-    def __call__(self, data: tf.Tensor) -> tf.Tensor:
+    def __call__(self, data: tf.Tensor) -> Tuple[tfd.Distribution, tfd.Distribution]:
         if len(data.shape) == 3:
             time_steps = data.shape[0]
             reshaped_data = tf.reshape(data, (-1, *data.shape[2:]))
@@ -156,7 +156,8 @@ class EnvDecoder:
                                                                                                *res[1].shape[1:]))
         else:
             res = self.model(data)
-        return res
+        return tfd.Independent(tfd.Normal(res[0], 1), len(res[0].shape)), \
+               tfd.Independent(tfd.Normal(res[1], 1), len(res[1].shape))
 
     def save(self, checkpoint_dir, name):
         self.model.save(
@@ -172,24 +173,23 @@ class EnvDecoder:
 class EnvEncoder:
     def get_model(self, env_memory_size, units, conv_filters, out_size):
         tgt_inputs = tf.keras.Input(shape=(11, 11, 2 * env_memory_size))
-        vector_input = tf.keras.Input(shape=(119 * env_memory_size,))
+        vector_input = tf.keras.Input(shape=(VECTOR_OBS * env_memory_size,))
 
-        conv_branch = tf.keras.layers.Conv2D(conv_filters, 3, strides=1, padding='same', activation='linear')(
-            tgt_inputs)
-        conv_branch = tf.keras.layers.Conv2D(conv_filters, 3, strides=1, padding='same')(conv_branch)
-        conv_branch = tf.keras.layers.LeakyReLU()(conv_branch)
-        conv_branch = tf.keras.layers.Conv2D(conv_filters, 3, strides=1, padding='same')(conv_branch)
-        conv_branch = tf.keras.layers.LeakyReLU()(conv_branch)
+        cv_kwargs = {
+            'strides': 1, 'padding': 'same', 'activation': tf.nn.relu
+        }
+        conv_branch = tf.keras.layers.Conv2D(conv_filters, 3, **cv_kwargs)(tgt_inputs)
+        conv_branch = tf.keras.layers.Conv2D(conv_filters * 2, 3, **cv_kwargs)(conv_branch)
+        conv_branch = tf.keras.layers.Conv2D(conv_filters * 4, 3, **cv_kwargs)(conv_branch)
         conv_vector = tf.keras.layers.GlobalAveragePooling2D()(conv_branch)
 
-        x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(vector_input)
-        x = tf.keras.layers.LeakyReLU()(x)
-        x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(x)
-        x = tf.keras.layers.LeakyReLU()(x)
-        x = tf.keras.layers.Dense(units, kernel_regularizer=tf.keras.regularizers.L1L2(l1=1e-5, l2=1e-4))(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.elu)(vector_input)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.elu)(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.elu)(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.elu)(x)
         concated = tf.keras.layers.Concatenate()([x, conv_vector])
 
-        out = tf.keras.layers.Dense(out_size, activation='sigmoid')(concated)
+        out = tf.keras.layers.Dense(out_size, activation=tf.nn.relu)(concated)
         return tf.keras.Model(inputs=[tgt_inputs, vector_input], outputs=out)
 
     def __init__(self, env_memory_size, emb_size, units, conv_filters):
@@ -226,6 +226,7 @@ class DenseDecoder:
             tfkl.Input(shape=(inp,)),
             tfkl.Dense(units, tf.nn.elu),
             tfkl.Dense(units, tf.nn.elu),
+            tfkl.Dense(units, tf.nn.elu),
             tfkl.Dense(out_size)
         ])
 
@@ -259,8 +260,9 @@ class RSSM:
         self.s_size = stochastic
         self.d_size = determenistic
         self.hidden = hidden
-        self.prior_model = self.get_prior_model(hidden, determenistic, NUM_ACTIONS, determenistic)
-        self.post_model = self.get_post_model(hidden, determenistic, determenistic, embedding_shape)
+        self.prior_model = self.get_prior_model(hid=hidden, d_size=determenistic, action_shape=NUM_ACTIONS,
+                                                stoch_shape=stochastic)
+        self.post_model = self.get_post_model(hidden, determenistic, embedding_shape)
 
     def save(self, checkpoint_dir, prior_model_name, post_model_name):
         self.prior_model.save(
@@ -293,23 +295,25 @@ class RSSM:
         grads = tape.gradient(loss, self.post_model.trainable_weights)
         optimizer.apply_gradients(zip(grads, self.post_model.trainable_weights))
 
-    def get_prior_model(self, hid, d_size, action_shape, deter_shape) -> tf.keras.Model:
-        det_inputs = tf.keras.Input(shape=deter_shape)
+    def get_prior_model(self, hid, d_size, action_shape, stoch_shape) -> tf.keras.Model:
+        stoch_inputs = tf.keras.Input(shape=stoch_shape)
+        det_inputs = tf.keras.Input(shape=d_size)
         act_inputs = tf.keras.Input(shape=action_shape)
-        x = tfkl.Concatenate(axis=-1)([det_inputs, act_inputs])
+        x = tfkl.Concatenate(axis=-1)([stoch_inputs, act_inputs])
+        x = tfkl.Dense(hid, tf.nn.elu, name='prior0')(x)
         x, det_tensor = tfkl.GRUCell(d_size, name='cell')(x, det_inputs)
         x = tfkl.Dense(hid, tf.nn.elu, name='prior1')(x)
         x = tfkl.Dense(hid, tf.nn.elu, name='prior2')(x)
-        x = tfkl.Dense(2 * self.s_size, activation='sigmoid')(x)
-        return tf.keras.Model(inputs=[det_inputs, act_inputs], outputs=[x, det_tensor])
+        x = tfkl.Dense(2 * self.s_size)(x)
+        return tf.keras.Model(inputs=[det_inputs, stoch_inputs, act_inputs], outputs=[x, det_tensor])
 
-    def get_post_model(self, hid, d_size, deter_shape, env_shape) -> tf.keras.Model:
+    def get_post_model(self, hid, deter_shape, env_shape) -> tf.keras.Model:
         prior_inputs = tf.keras.Input(shape=deter_shape)
         env_inputs = tf.keras.Input(shape=env_shape)
         x = tfkl.Concatenate(axis=-1)([prior_inputs, env_inputs])
         x = tfkl.Dense(hid, tf.nn.elu, name='post1')(x)
         x = tfkl.Dense(hid, tf.nn.elu, name='post2')(x)
-        x = tfkl.Dense(2 * d_size, activation='sigmoid')(x)
+        x = tfkl.Dense(2 * self.s_size)(x)
         return tf.keras.Model(inputs=[prior_inputs, env_inputs], outputs=[x])
 
     def observe(self, embedding: tf.Tensor, actions: tf.Tensor, state: State) -> Tuple[State, State]:
@@ -331,16 +335,16 @@ class RSSM:
             state = posterior_state
 
         prior = State(
-            mean=tf.squeeze(tf.stack([p.mean for p in prior])),
-            std=tf.squeeze(tf.stack([p.std for p in prior])),
-            deter=tf.squeeze(tf.stack([p.deter for p in prior])),
-            stoch=tf.squeeze(tf.stack([p.stoch for p in prior]))
+            mean=tf.stack([p.mean for p in prior]),
+            std=tf.stack([p.std for p in prior]),
+            deter=tf.stack([p.deter for p in prior]),
+            stoch=tf.stack([p.stoch for p in prior])
         )
         post = State(
-            mean=tf.squeeze(tf.stack([p.mean for p in post])),
-            std=tf.squeeze(tf.stack([p.std for p in post])),
-            deter=tf.squeeze(tf.stack([p.deter for p in post])),
-            stoch=tf.squeeze(tf.stack([p.stoch for p in post]))
+            mean=tf.stack([p.mean for p in post]),
+            std=tf.stack([p.std for p in post]),
+            deter=tf.stack([p.deter for p in post]),
+            stoch=tf.stack([p.stoch for p in post])
         )
 
         return prior, post
@@ -359,7 +363,7 @@ class RSSM:
 
     @tf.function
     def prior(self, prev_state: State, prev_action) -> State:
-        x, det = self.prior_model(([prev_state.deter], prev_action))
+        x, det = self.prior_model((prev_state.deter, prev_state.stoch, prev_action))
         mean, std = tf.split(x, 2, -1)
         std = tf.nn.softplus(std) + 0.1
         stoch = tfd.MultivariateNormalDiag(mean, std).sample()
@@ -367,12 +371,3 @@ class RSSM:
             mean=mean, std=std, deter=det, stoch=stoch
         )
         return prior
-
-
-def static_scan(fn, start, n_iterations, *args, **kwargs):
-    res = [start]
-    for i in range(n_iterations):
-        res.append(
-            fn(*res[-1], *args, *kwargs)
-        )
-    return res

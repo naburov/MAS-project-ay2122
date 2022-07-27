@@ -1,22 +1,20 @@
 import os
-from typing import Callable
 
-from Trainers.Dreamer.models import RSSM, DenseDecoder, ActionDecoder, EnvEncoder, EnvDecoder, State, static_scan
+from Trainers.Dreamer.models import RSSM, DenseDecoder, ActionDecoder, EnvEncoder, EnvDecoder, State
 import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
-hidden = 100
-determ = 30
-stoch = 30
+hidden = 128
+determ = 20
+stoch = 10
 units = 100
 num_actions = 22
-kl_scale = 0.01
-free_nats = 3.0
+kl_scale = 1.0
 gamma = 0.99
 lambda_ = 0.95
 horizon = 15
-env_memory_size = 8
-embedding_size = 100
+env_memory_size = 1
+embedding_size = 64
 filters = 32
 
 
@@ -31,37 +29,24 @@ def get_dist(mean, std):
 class Dreamer:
     def __init__(self, checkpoint_dir):
         self.encoder = EnvEncoder(env_memory_size, embedding_size, units, filters)
-        print('___________________________')
-        print(self.encoder.model.summary())
         self.dynamics_model = RSSM(stoch, determ, embedding_size, hidden)
-        print('___________________________')
-        print(self.dynamics_model.prior_model.summary())
-        print(self.dynamics_model.post_model.summary())
         self.reward_model = DenseDecoder(stoch + determ, units, 1)
-        print('___________________________')
-        print(self.reward_model.model.summary())
         self.value_model = DenseDecoder(stoch + determ, units, 1)
-        print('___________________________')
-        print(self.value_model.model.summary())
         self.decoder_model = EnvDecoder(env_memory_size, stoch + determ, units, filters)
-        print('___________________________')
-        print(self.decoder_model.model.summary())
         self.action_model = ActionDecoder(stoch + determ, num_actions, units)
-        print('___________________________')
-        print(self.action_model.model.summary())
 
-        self.action_opt = tf.keras.optimizers.Adam(2e-5)
-        self.value_opt = tf.keras.optimizers.Adam(2e-5)
-        self.dynamics_opt = tf.keras.optimizers.Adam(2e-5)
-        self.reward_opt = tf.keras.optimizers.Adam(2e-5)
-        self.encoder_opt = tf.keras.optimizers.Adam(2e-5)
-        self.decoder_opt = tf.keras.optimizers.Adam(2e-5)
+        self.action_opt = tf.keras.optimizers.Adam(1e-4)
+        self.value_opt = tf.keras.optimizers.Adam(1e-4)
+        self.dynamics_opt = tf.keras.optimizers.Adam(1e-4)
+        self.reward_opt = tf.keras.optimizers.Adam(1e-4)
+        self.encoder_opt = tf.keras.optimizers.Adam(1e-4)
+        self.decoder_opt = tf.keras.optimizers.Adam(1e-4)
 
         if len(os.listdir(checkpoint_dir)) > 0:
             print('Loading checkpoints from {0}'.format(checkpoint_dir))
             self.load_state(checkpoint_dir)
 
-    # @tf.function
+    @tf.function
     def policy(self, observations, state: State, prev_action: tf.Tensor, training=False):
         if state is None:
             latent = self.dynamics_model.initial_state(observations[0].shape[0])
@@ -76,7 +61,9 @@ class Dreamer:
             action = self.action_model(features).mode()
         else:
             action = self.action_model(features).sample()
-            action = tf.clip_by_value(tfd.Normal(action, 0.1).sample(), 0, 1)
+            action = tf.clip_by_value(
+                (tfd.Normal(action, 0.1).sample() + 1.0) / 2,
+                0, 1)
         return action, post
 
     def train_step(self, observations, actions, rewards):
@@ -86,16 +73,13 @@ class Dreamer:
             feat = get_feat(post)
             vf_pred, v_pred = self.decoder_model(feat)
             reward_pred = self.reward_model(feat)
-            reconstruction_loss = tf.math.log(
-                tf.reduce_sum((observations[0] - vf_pred) ** 2) +
-                tf.reduce_sum((observations[1] - v_pred) ** 2))
+            reconstruction_loss = tf.reduce_mean(vf_pred.log_prob(observations[0])) + tf.reduce_mean(v_pred.log_prob(observations[1]))
             reward_prob = tf.reduce_mean(reward_pred.log_prob(rewards[..., None]))
 
-            prior_dist = get_dist(prior.stoch, prior.deter)
-            post_dist = get_dist(post.stoch, post.deter)
+            prior_dist = get_dist(prior.mean, prior.std)
+            post_dist = get_dist(post.mean, post.std)
             div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
-            div = tf.maximum(div, free_nats)
-            model_loss = kl_scale * div + reconstruction_loss - reward_prob
+            model_loss = kl_scale * div - reconstruction_loss - reward_prob
 
         self.dynamics_model.backward(self.dynamics_opt, model_tape, model_loss)
         self.decoder_model.backward(self.decoder_opt, model_tape, model_loss)
@@ -148,20 +132,23 @@ class Dreamer:
         }
 
     def imagine_ahead(self, post: State) -> tf.Tensor:
+        def train_policy(s):
+            f = tf.stop_gradient(
+                get_feat(s)
+            )
+            a = (self.action_model(f).sample() + 1.0) / 2
+            return a
 
         state = State(
             mean=tf.reshape(post.mean, (-1, stoch)),
             std=tf.reshape(post.std, (-1, stoch)),
             stoch=tf.reshape(post.stoch, (-1, stoch)),
-            deter=tf.reshape(post.mean, (-1, determ)),
+            deter=tf.reshape(post.deter, (-1, determ)),
         )
 
         prior_states = []
         for t in range(horizon):
-            action = self.action_model(
-                tf.stop_gradient(
-                    get_feat(state)
-                )).sample()
+            action = train_policy(state)
             prior = self.dynamics_model.prior(prev_state=state,
                                               prev_action=action)
             prior_states.append(prior)
@@ -192,18 +179,3 @@ class Dreamer:
         self.value_model.load(checkpoint_dir, 'value')
         self.decoder_model.load(checkpoint_dir, 'decoder')
         self.action_model.load(checkpoint_dir, 'action')
-
-    def v_k_n(self, reward, value) -> tf.Tensor:
-        discount = gamma * tf.ones_like(reward)
-        discount = tf.math.cumprod(discount, axis=0)
-        reward = tf.math.cumsum(reward, axis=0)
-        discounted_rewards = tf.multiply(discount, reward)
-        discounted_values = tf.multiply(discount * gamma, value)
-        return discounted_values + discounted_rewards
-
-    def estimate_return(self, v_k_n: tf.Tensor):
-        discount = lambda_ * tf.ones_like(v_k_n)
-        discount = tf.math.cumprod(discount, axis=0)
-        v_k_n = tf.math.cumsum(v_k_n, axis=0)
-        discounted_v_k_n = tf.multiply(discount, v_k_n)
-        return (1 - lambda_) * discounted_v_k_n

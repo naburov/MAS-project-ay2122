@@ -18,7 +18,7 @@ class DreamerTrainManager(TrainManager):
         self.buffer_path = buffer_path
         self.batch_size = batch_size
         self.num_ranks = num_ranks
-        self.horizon = 15
+        self.sequence_length = 30
 
         self.buf = ReplayBuffer(buffer_capacity, num_ranks, memory_size)
 
@@ -28,17 +28,16 @@ class DreamerTrainManager(TrainManager):
         self.prev_actions = None
         self.prev_state = None
 
-    def predict_actions(self, obss):
+    def predict_actions(self, obss, training):
         vfs = np.stack([o[0] for o in obss], axis=0)
         vs = np.stack([o[1] for o in obss], axis=0)
-        action, state = self.dreamer.policy((vfs, vs), self.prev_state, self.prev_actions)
+        action, state = self.dreamer.policy((vfs, vs), self.prev_state, self.prev_actions, training=training)
         self.prev_actions = action
         self.prev_state = state
         return action.numpy()
 
     def train_step(self):
-        # vf, v, r, next_vf, next_v, a = self.buf.sample_sequences(self.batch_size)
-        seq = self.buf.sample_sequences_tensors(self.batch_size, self.horizon)
+        seq = self.buf.sample_sequences_tensors(self.batch_size, self.sequence_length)
         return self.dreamer.train_step(observations=(seq[0], seq[1]), rewards=seq[2], actions=seq[-1])
 
     def on_episode_begin(self, epoch_n, episode_n):
@@ -46,9 +45,13 @@ class DreamerTrainManager(TrainManager):
         self.prev_actions = None
         self.prev_state = None
 
+    def on_episode_end(self, epoch_n, episode_n):
+        self.buf.finish_episode(self.num_ranks)
+
     def on_epoch_end(self, epoch_n):
         self.dreamer.save_state(self.checkpoint_dir)
-        self.buf.save_sequences(self.buffer_path)
+        if epoch_n % 2 == 0:
+            self.buf.save_sequences(self.buffer_path)
 
     def append_observations(self, data, info):
         self.buf.append(data, info)

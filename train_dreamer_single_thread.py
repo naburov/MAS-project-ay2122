@@ -1,8 +1,9 @@
+import statistics
 from MyEnv import MyEnv
 from Trainers.Dreamer.TrainManager import DreamerTrainManager
 from config import *
 from Trainers.DDPGTrainManager.logger import Logger
-
+from tqdm import tqdm
 import tensorflow as tf
 
 gpus = tf.config.list_physical_devices('GPU')
@@ -25,9 +26,10 @@ manager = DreamerTrainManager(checkpoint_dir=MODEL_CHECKPOINT_DIR,
                               batch_size=BATCH_SIZE)
 logger = Logger()
 print('Loaded: ', manager.buf.num_sequences, ' sequences')
-
+train_steps = 25
 env = MyEnv(visualize=False, memory_size=ENV_MEMORY_SIZE)
 for epoch in range(EPOCHS):
+    rewards = []
     for num_episode in range(EPISODES_PER_EPOCH):
         is_random = False
 
@@ -39,21 +41,32 @@ for epoch in range(EPOCHS):
 
         done = False
         r = 0
+        it_count = 0
         while not done:
-            actions = manager.predict_actions([observation])
-            if is_random:
-                actions = [env.action_space.sample()]
+            if it_count % 5 == 0:
+                if is_random:
+                    actions = [env.action_space.sample()]
+                else:
+                    actions = manager.predict_actions([observation], training=True)
+            it_count += 1
+
             old_observations = observation
             observation, reward, done, info = env.step(actions[0])
             r += reward
             manager.append_observations(
                 (*old_observations, reward, *observation, actions[0]), {'rank': 1})
 
+        manager.on_episode_end(epoch, num_episode)
         print('Finished episode ', num_episode)
-        logger.log2txt(REWARD_LOGS_PATH,
-                       'Epoch: {0}, Ep n: {1}, Avg rew: {2}'.format(epoch, num_episode, r))
+        rewards.append(r)
 
-        if manager.buf.num_sequences > BATCH_SIZE:
+    print('Epoch: {0}, Avg rew: {1}'.format(epoch, statistics.mean(rewards)))
+    logger.log2txt(REWARD_LOGS_PATH,
+                   'Epoch: {0} Avg rew: {1}'.format(epoch, statistics.mean(rewards)))
+
+    if manager.buf.num_sequences > BATCH_SIZE:
+        print('Performing training')
+        for i in tqdm(range(train_steps)):
             losses = manager.train_step()
             logger.logDict(LOSSES_LOGS_PATH, losses)
 

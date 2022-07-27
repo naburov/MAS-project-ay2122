@@ -5,7 +5,7 @@ import tensorflow as tf
 import pickle
 
 TGT_FIELD_SHAPE = (11, 11)
-VECTOR_OBS_LEN = 119
+VECTOR_OBS_LEN = 97
 NUM_ACTIONS = 22
 
 
@@ -25,16 +25,15 @@ class EpisodeReplayBuffer:
         if self.active_indices[-1] == self.capacity - 1:
             self.active_indices = [i for i in range(num_ranks - 1)]
         else:
-            self.active_indices = [self.num_sequences + i for i in range(num_ranks - 1)]
+            self.active_indices = [self.active_indices[-1] + i for i in range(1, num_ranks)]
 
         for id in self.active_indices:
             self.sequences[id] = None
 
+    def finish_episode(self, num_ranks):
         self.num_sequences = max(0, min(self.num_sequences + num_ranks - 1, self.capacity))
-        print('Active indices ', self.active_indices, ' Num sequences ', self.num_sequences)
 
     def append(self, observation, info):
-        # print(len(self.sequences), info['rank'] - 1, self.active_indices, self.capacity)
         if self.sequences[self.active_indices[info['rank'] - 1]] is None:
             self.sequences[self.active_indices[info['rank'] - 1]] = [observation]
         else:
@@ -53,9 +52,12 @@ class EpisodeReplayBuffer:
         reward_buffer = np.zeros((n_steps, num_sequences,))
         next_vf_state_buffer = np.zeros((n_steps, num_sequences, *TGT_FIELD_SHAPE, self.env_memory_size * 2))
         next_vector_state_bufffer = np.zeros((n_steps, num_sequences, VECTOR_OBS_LEN * self.env_memory_size))
+
         if num_sequences > self.num_sequences:
             num_sequences = self.num_sequences
-        indices = np.random.choice(min(self.num_sequences, self.capacity), num_sequences)
+
+        indices = np.random.choice(min(self.num_sequences - 1, self.capacity), num_sequences)
+
         for i in range(len(indices)):
             start = random.randint(0, len(self.sequences[indices[i]]) - n_steps)
             for j in range(start, start + n_steps):
@@ -66,6 +68,7 @@ class EpisodeReplayBuffer:
                 next_vf_state_buffer[j - start, i] = o[3]
                 next_vector_state_bufffer[j - start, i] = o[4]
                 action_buffer[j - start, i] = o[5]
+
         if not convert_to_tf__tensors:
             return (
                 vf_state_buffer,
