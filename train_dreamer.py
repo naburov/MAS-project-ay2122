@@ -15,8 +15,6 @@ rank = comm.Get_rank()
 env = None
 data = None
 
-train_steps = 25
-
 if rank == 0:
     import tensorflow as tf
 
@@ -62,7 +60,7 @@ if rank == 0:
             it_count = 0
             while len(cont_env) > 0:
                 # make step
-                if it_count % 2 == 0:
+                if it_count % N_REPEAT_ACIONS == 0:
                     if is_random:
                         actions = np.random.random_sample((total_ranks - 1, 22,))
                     else:
@@ -84,7 +82,8 @@ if rank == 0:
                     observations[cont_env[i] - 1] = data['obs']
                     rewards[cont_env[i] - 1] += data['r']
                     manager.append_observations(
-                        (*old_observations[cont_env[i] - 1], data['r'], *data['obs'], actions[i].astype('float32')), data['info'])
+                        (*old_observations[cont_env[i] - 1], data['r'], *data['obs'], actions[i].astype('float32')),
+                        data['info'])
 
                     if data['done']:
                         br = True
@@ -100,7 +99,7 @@ if rank == 0:
 
         print('Performing training')
         if not is_random:
-            for i in tqdm(range(train_steps)):
+            for i in tqdm(range(TRAIN_STEPS)):
                 losses = manager.train_step()
                 logger.logDict(LOSSES_LOGS_PATH, losses)
         manager.on_epoch_end(epoch)

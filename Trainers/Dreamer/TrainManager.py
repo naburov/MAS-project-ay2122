@@ -1,13 +1,9 @@
-from Trainers.DDPGTrainManager.models import get_actor_model, get_critic_model
-from Trainers.DDPGTrainManager.noise_utils import OUActionNoise
-# from Trainers.simple_replay_buffer import SimpleReplayBuffer as ReplayBuffer
 from Trainers.Dreamer.DreamerV1 import Dreamer
 from Trainers.episodes_replay_buffer import EpisodeReplayBuffer as ReplayBuffer
-from Trainers.DDPGTrainManager.train_utils import train_step, update_target
 from Trainers.Trainer import TrainManager
 import os
 import numpy as np
-import tensorflow as tf
+from config import *
 
 
 class DreamerTrainManager(TrainManager):
@@ -18,7 +14,7 @@ class DreamerTrainManager(TrainManager):
         self.buffer_path = buffer_path
         self.batch_size = batch_size
         self.num_ranks = num_ranks
-        self.sequence_length = 30
+        self.sequence_length = SEQUENCE_LENGTH
 
         self.buf = ReplayBuffer(buffer_capacity, num_ranks, memory_size)
 
@@ -50,7 +46,7 @@ class DreamerTrainManager(TrainManager):
 
     def on_epoch_end(self, epoch_n):
         self.dreamer.save_state(self.checkpoint_dir)
-        if epoch_n % 2 == 0:
+        if epoch_n % 20 == 0:
             self.buf.save_sequences(self.buffer_path)
 
     def append_observations(self, data, info):

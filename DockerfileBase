@@ -1,4 +1,4 @@
-FROM tensorflow/tensorflow:2.3.0-gpu
+FROM tensorflow/tensorflow:2.4.0-gpu
 
 RUN apt-get --yes install wget
 RUN apt-key del A4B469963BF863CC

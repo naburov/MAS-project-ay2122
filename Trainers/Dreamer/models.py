@@ -88,6 +88,7 @@ class ActionDecoder:
             tfkl.Dense(units, tf.nn.elu),
             tfkl.Dense(units, tf.nn.elu),
             tfkl.Dense(units, tf.nn.elu),
+            tfkl.Dense(units, tf.nn.elu),
             tfkl.Dense(2 * size)
         ])
 

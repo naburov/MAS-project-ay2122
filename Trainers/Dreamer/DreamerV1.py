@@ -2,20 +2,8 @@ import os
 
 from Trainers.Dreamer.models import RSSM, DenseDecoder, ActionDecoder, EnvEncoder, EnvDecoder, State
 import tensorflow as tf
+from config import *
 from tensorflow_probability import distributions as tfd
-
-hidden = 128
-determ = 20
-stoch = 10
-units = 100
-num_actions = 22
-kl_scale = 1.0
-gamma = 0.99
-lambda_ = 0.95
-horizon = 15
-env_memory_size = 1
-embedding_size = 64
-filters = 32
 
 
 def get_feat(state: State) -> tf.Tensor:
@@ -62,7 +50,7 @@ class Dreamer:
         else:
             action = self.action_model(features).sample()
             action = tf.clip_by_value(
-                (tfd.Normal(action, 0.1).sample() + 1.0) / 2,
+                (tfd.Normal(action, noise).sample() + 1.0) / 2,
                 0, 1)
         return action, post
 
@@ -73,7 +61,8 @@ class Dreamer:
             feat = get_feat(post)
             vf_pred, v_pred = self.decoder_model(feat)
             reward_pred = self.reward_model(feat)
-            reconstruction_loss = tf.reduce_mean(vf_pred.log_prob(observations[0])) + tf.reduce_mean(v_pred.log_prob(observations[1]))
+            reconstruction_loss = tf.reduce_mean(vf_pred.log_prob(observations[0])) + tf.reduce_mean(
+                v_pred.log_prob(observations[1]))
             reward_prob = tf.reduce_mean(reward_pred.log_prob(rewards[..., None]))
 
             prior_dist = get_dist(prior.mean, prior.std)
