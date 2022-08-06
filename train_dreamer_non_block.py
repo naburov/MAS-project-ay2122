@@ -83,41 +83,48 @@ if rank == 0:
                         actions = manager.predict_actions(observations, training=True)
                 it_count += 1
 
-                if it_count % 10 == 0:
-                    logger.log2txt(DEBUG_LOGS_PATH,
-                                   'It count: {0} Epoch: {1} Ep: {2}'.format(it_count, epoch, num_episode))
+                # if it_count % 10 == 0:
+                #     logger.log2txt(DEBUG_LOGS_PATH,
+                #                    'It count: {0} Epoch: {1} Ep: {2}'.format(it_count, epoch, num_episode))
 
                 old_observations = observations
                 observations = [manager.get_initial_observation() for i in range(total_ranks - 1)]
 
+                requests = []
                 for i in range(0, len(cont_env)):
                     if cont_env_is_run[i]:
                         logger.log_highload(H_DEBUG_LOGS_PATH,
                                             'Sending action to {0}'.format(cont_env[i]))
-                        comm.send(1, dest=cont_env[i], tag=11)
-                        comm.Send(actions[i].astype('float32'), dest=cont_env[i], tag=13)
+                        req = comm.isend(1, dest=cont_env[i], tag=11)
+                        requests.append(req)
+                MPI.Request.waitall(requests)
+
+                requests = []
+                for i in range(0, len(cont_env)):
+                    if cont_env_is_run[i]:
+                        req = comm.Isend(actions[i].astype('float32'), dest=cont_env[i], tag=13)
+                        requests.append(req)
+                MPI.Request.Waitall(requests)
+
+                buffer = [None] * (total_ranks - 1)
+                requests = []
+                for i in range(0, len(cont_env)):
+                    if cont_env_is_run[i]:
+                        data = np.empty((3 + ENV_MEMORY_SIZE * (11 * 11 * 2) + ENV_MEMORY_SIZE * 97), dtype=np.float32)
+                        buffer[cont_env[i] - 1] = data
+                        req = comm.Irecv(buffer[cont_env[i] - 1], source=cont_env[i], tag=13)
+                        requests.append(req)
+                MPI.Request.Waitall(requests)
 
                 for i in range(0, len(cont_env)):
                     if cont_env_is_run[i]:
-
-                        data = np.empty((3), dtype=np.float32)
-                        vf = np.empty((11, 11, 2), dtype=np.float32)
-                        v = np.empty((97,), dtype=np.float32)
-
-                        logger.log_highload(H_DEBUG_LOGS_PATH,
-                                            'Receiving metadata from {0}'.format(cont_env[i]))
-                        comm.Recv(data, source=cont_env[i], tag=13)
-                        logger.log_highload(H_DEBUG_LOGS_PATH,
-                                            'Receiving vector field from {0}'.format(cont_env[i]))
-                        comm.Recv(vf, source=cont_env[i], tag=13)
-                        logger.log_highload(H_DEBUG_LOGS_PATH,
-                                            'Receiving vector from {0}'.format(cont_env[i]))
-                        comm.Recv(v, source=cont_env[i], tag=13)
+                        data = buffer[cont_env[i] - 1]
+                        metadata = data[:3]
+                        vf = np.reshape(data[3: 3 + ENV_MEMORY_SIZE * (11 * 11 * 2)], (11, 11, 2 * ENV_MEMORY_SIZE))
+                        v = data[3 + ENV_MEMORY_SIZE * (11 * 11 * 2):]
 
                         observations[cont_env[i] - 1] = (vf, v)
                         rewards[cont_env[i] - 1] += data[0]
-                        logger.log_highload(H_DEBUG_LOGS_PATH,
-                                            'Writing obs to replay buffer {0}'.format(cont_env[i]))
 
                         manager.append_observations(
                             (*old_observations[cont_env[i] - 1], data[1], vf, v,
@@ -125,9 +132,9 @@ if rank == 0:
                             int(data[2]))
 
                         if bool(data[1]):
-                            logger.log2txt(DEBUG_LOGS_PATH,
-                                           'Finished epoch: {0}, Ep n: {1}, rank: {2}'.format(epoch, num_episode,
-                                                                                              int(data[2])))
+                            # logger.log2txt(DEBUG_LOGS_PATH,
+                            #                'Finished epoch: {0}, Ep n: {1}, rank: {2}'.format(epoch, num_episode,
+                            #                                                                   int(data[2])))
                             cont_env_is_run[i] = cont_env_is_run[i] and False
 
             manager.on_episode_end(epoch, num_episode)
@@ -136,8 +143,8 @@ if rank == 0:
             logger.log2txt(REWARD_LOGS_PATH,
                            'Epoch: {0}, Ep n: {1}, Avg rew: {2}'.format(epoch, num_episode, avg))
 
-        logger.log2txt(DEBUG_LOGS_PATH,
-                       'Performing training')
+        # logger.log2txt(DEBUG_LOGS_PATH,
+        #                'Performing training')
         if not is_random:
             for i in tqdm(range(TRAIN_STEPS)):
                 losses = manager.train_step()
@@ -166,13 +173,10 @@ else:
         elif data == 1:
             action = np.empty(22, dtype=np.float32)
             comm.Recv(action, source=0, tag=13)
-            observation, reward, done, info = env.step(action)
+            observation, reward, done, info = env.step(action, obs_as_single_vector=True)
             metadata = np.array([float(reward), float(done), float(rank)], dtype=np.float32)
-            d = np.ascontiguousarray(metadata, dtype=np.float32)
-            vf = np.ascontiguousarray(observation[0], dtype=np.float32)
-            v = np.ascontiguousarray(observation[1], dtype=np.float32)
+            data = np.concatenate([metadata, observation], axis=-1)
+            d = np.ascontiguousarray(data, dtype=np.float32)
             comm.Send(d, dest=0, tag=13)
-            comm.Send(vf, dest=0, tag=13)
-            comm.Send(v, dest=0, tag=13)
         elif data == 2:
             break

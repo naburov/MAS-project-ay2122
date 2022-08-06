@@ -47,14 +47,19 @@ class MyEnv(L2M2019Env):
         tgt_field, body_vector = self.flatten_queues()
         return tgt_field, body_vector
 
-    def step(self, action, project=True, obs_as_dict=True):
+    def step(self, action, project=True, obs_as_dict=True, obs_as_single_vector=False):
         obs, reward, done, info = super(MyEnv, self).step(action, project=project, obs_as_dict=obs_as_dict)
         tgt_field, body_vector = observation2tensors(obs)
         self.tgt_field_queue.append(tgt_field)
         self.body_vector_queue.append(body_vector)
         self.actions_queue.append(action)
         tgt_field, body_vector = self.flatten_queues()
-        return (tgt_field, body_vector), reward, done, info
+        if obs_as_single_vector:
+            tgt_field = tgt_field.flatten()
+            concated = np.concatenate([tgt_field, body_vector], axis=-1)
+            return concated, reward, done, info
+        else:
+            return (tgt_field, body_vector), reward, done, info
 
     def flatten_queues(self):
         tgt_fields = [f for f in self.tgt_field_queue]

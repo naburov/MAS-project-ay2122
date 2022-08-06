@@ -1,3 +1,4 @@
+from Trainers.DDPGTrainManager.logger import Logger
 from Trainers.Dreamer.DreamerV1 import Dreamer
 from Trainers.episodes_replay_buffer import EpisodeReplayBuffer as ReplayBuffer
 from Trainers.Trainer import TrainManager
@@ -30,7 +31,7 @@ class DreamerTrainManager(TrainManager):
         action, state = self.dreamer.policy((vfs, vs), self.prev_state, self.prev_actions, training=training)
         self.prev_actions = action
         self.prev_state = state
-        return action.numpy().astype('float64')
+        return action.numpy().astype('float32')
 
     def train_step(self):
         seq = self.buf.sample_sequences_tensors(self.batch_size, self.sequence_length, True)
@@ -44,10 +45,18 @@ class DreamerTrainManager(TrainManager):
     def on_episode_end(self, epoch_n, episode_n):
         self.buf.finish_episode(self.num_ranks)
 
+    def get_initial_observation(self):
+        return np.zeros((11, 11, 2)), np.zeros((97,))
+
     def on_epoch_end(self, epoch_n):
+        logger = Logger(100)
+        logger.log2txt(DEBUG_LOGS_PATH,
+                       'Saving nets epoch {0}'.format(epoch_n))
         self.dreamer.save_state(self.checkpoint_dir)
-        if epoch_n % 20 == 0:
+        if epoch_n % BUF_SAVE_TIMEOUT == 0:
+            logger.log2txt(DEBUG_LOGS_PATH,
+                           'Saving buf'.format(epoch_n))
             self.buf.save_sequences(self.buffer_path)
 
-    def append_observations(self, data, info):
-        self.buf.append(data, info)
+    def append_observations(self, data, rank):
+        self.buf.append(data, rank)

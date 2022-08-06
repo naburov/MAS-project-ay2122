@@ -33,11 +33,11 @@ class EpisodeReplayBuffer:
     def finish_episode(self, num_ranks):
         self.num_sequences = max(0, min(self.num_sequences + num_ranks - 1, self.capacity))
 
-    def append(self, observation, info):
-        if self.sequences[self.active_indices[info['rank'] - 1]] is None:
-            self.sequences[self.active_indices[info['rank'] - 1]] = [observation]
+    def append(self, observation, rank):
+        if self.sequences[self.active_indices[rank - 1]] is None:
+            self.sequences[self.active_indices[rank - 1]] = [observation]
         else:
-            self.sequences[self.active_indices[info['rank'] - 1]].append(observation)
+            self.sequences[self.active_indices[rank- 1]].append(observation)
 
     def sample_sequences(self, num_sequences):
         if num_sequences > self.num_sequences:
@@ -49,7 +49,7 @@ class EpisodeReplayBuffer:
         vf_state_buffer = np.zeros((n_steps, num_sequences, *TGT_FIELD_SHAPE, self.env_memory_size * 2))
         vector_state_bufffer = np.zeros((n_steps, num_sequences, VECTOR_OBS_LEN * self.env_memory_size))
         action_buffer = np.zeros((n_steps, num_sequences, NUM_ACTIONS))
-        reward_buffer = np.zeros((n_steps, num_sequences,))
+        reward_buffer = np.zeros((n_steps, num_sequences, 1))
         next_vf_state_buffer = np.zeros((n_steps, num_sequences, *TGT_FIELD_SHAPE, self.env_memory_size * 2))
         next_vector_state_bufffer = np.zeros((n_steps, num_sequences, VECTOR_OBS_LEN * self.env_memory_size))
 
@@ -104,7 +104,7 @@ class EpisodeReplayBuffer:
         vf_state_buffer = np.zeros((batch_size, *TGT_FIELD_SHAPE, self.env_memory_size * 2))
         vector_state_bufffer = np.zeros((batch_size, VECTOR_OBS_LEN * self.env_memory_size))
         action_buffer = np.zeros((batch_size, NUM_ACTIONS))
-        reward_buffer = np.zeros((batch_size,))
+        reward_buffer = np.zeros((batch_size, 1))
         next_vf_state_buffer = np.zeros((batch_size, *TGT_FIELD_SHAPE, self.env_memory_size * 2))
         next_vector_state_bufffer = np.zeros((batch_size, VECTOR_OBS_LEN * self.env_memory_size))
         counter = 0

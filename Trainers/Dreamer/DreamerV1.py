@@ -21,9 +21,11 @@ class Dreamer:
         self.reward_model = DenseDecoder(stoch + determ, units, 1)
         self.value_model = DenseDecoder(stoch + determ, units, 1)
         self.decoder_model = EnvDecoder(env_memory_size, stoch + determ, units, filters)
-        self.action_model = ActionDecoder(stoch + determ, num_actions, units)
+        self.action_model_1 = ActionDecoder(stoch + determ, num_actions // 2, units)
+        self.action_model_2 = ActionDecoder(stoch + determ, num_actions // 2, units)
 
-        self.action_opt = tf.keras.optimizers.Adam(1e-4)
+        self.action_opt_1 = tf.keras.optimizers.Adam(1e-4)
+        self.action_opt_2 = tf.keras.optimizers.Adam(1e-4)
         self.value_opt = tf.keras.optimizers.Adam(1e-4)
         self.dynamics_opt = tf.keras.optimizers.Adam(1e-4)
         self.reward_opt = tf.keras.optimizers.Adam(1e-4)
@@ -46,9 +48,13 @@ class Dreamer:
         _, post = self.dynamics_model.posterior(latent, action, embedding)
         features = get_feat(post)
         if not training:
-            action = self.action_model(features).mode()
+            action_1 = self.action_model_1(features).mode()
+            action_2 = self.action_model_2(features).mode()
+            action = tf.concat([action_1, action_2], axis=-1)
         else:
-            action = self.action_model(features).sample()
+            action_1 = self.action_model_1(features).sample()
+            action_2 = self.action_model_2(features).sample()
+            action = tf.concat([action_1, action_2], axis=-1)
             action = tf.clip_by_value(
                 (tfd.Normal(action, noise).sample() + 1.0) / 2,
                 0, 1)
@@ -63,7 +69,7 @@ class Dreamer:
             reward_pred = self.reward_model(feat)
             reconstruction_loss = tf.reduce_mean(vf_pred.log_prob(observations[0])) + tf.reduce_mean(
                 v_pred.log_prob(observations[1]))
-            reward_prob = tf.reduce_mean(reward_pred.log_prob(rewards[..., None]))
+            reward_prob = tf.reduce_mean(reward_pred.log_prob(rewards))
 
             prior_dist = get_dist(prior.mean, prior.std)
             post_dist = get_dist(post.mean, post.std)
@@ -77,7 +83,7 @@ class Dreamer:
 
         del model_tape
 
-        with tf.GradientTape() as actor_tape:
+        with tf.GradientTape(persistent=True) as actor_tape:
             imag_feat = self.imagine_ahead(post)
             reward = self.reward_model(imag_feat).mode()
             value = self.value_model(imag_feat).mode()
@@ -104,7 +110,10 @@ class Dreamer:
             returns = (1 - lambda_) * v_k_n + v_h_n
 
             actor_loss = -tf.reduce_mean(returns)
-        self.action_model.backward(self.action_opt, actor_tape, actor_loss)
+        self.action_model_1.backward(self.action_opt_1, actor_tape, actor_loss)
+        self.action_model_2.backward(self.action_opt_2, actor_tape, actor_loss)
+
+        del actor_tape
 
         with tf.GradientTape() as value_tape:
             value_pred = self.value_model(imag_feat)[:-1]
@@ -125,7 +134,10 @@ class Dreamer:
             f = tf.stop_gradient(
                 get_feat(s)
             )
-            a = (self.action_model(f).sample() + 1.0) / 2
+            action_1 = self.action_model_1(f).sample()
+            action_2 = self.action_model_2(f).sample()
+            action = tf.concat([action_1, action_2], axis=-1)
+            a = (action + 1.0) / 2
             return a
 
         state = State(
@@ -159,7 +171,8 @@ class Dreamer:
         self.reward_model.save(checkpoint_dir, 'reward')
         self.value_model.save(checkpoint_dir, 'value')
         self.decoder_model.save(checkpoint_dir, 'decoder')
-        self.action_model.save(checkpoint_dir, 'action')
+        self.action_model_1.save(checkpoint_dir, 'action_1')
+        self.action_model_2.save(checkpoint_dir, 'action_2')
 
     def load_state(self, checkpoint_dir):
         self.encoder.load(checkpoint_dir, 'encoder')
@@ -167,4 +180,5 @@ class Dreamer:
         self.reward_model.load(checkpoint_dir, 'reward')
         self.value_model.load(checkpoint_dir, 'value')
         self.decoder_model.load(checkpoint_dir, 'decoder')
-        self.action_model.load(checkpoint_dir, 'action')
+        self.action_model_1.load(checkpoint_dir, 'action_1')
+        self.action_model_2.load(checkpoint_dir, 'action_2')

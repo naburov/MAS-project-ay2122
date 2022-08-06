@@ -95,29 +95,19 @@ if rank == 0:
                         logger.log_highload(H_DEBUG_LOGS_PATH,
                                             'Sending action to {0}'.format(cont_env[i]))
                         comm.send(1, dest=cont_env[i], tag=11)
-                        comm.Send(actions[i].astype('float32'), dest=cont_env[i], tag=13)
 
                 for i in range(0, len(cont_env)):
                     if cont_env_is_run[i]:
 
-                        data = np.empty((3), dtype=np.float32)
-                        vf = np.empty((11, 11, 2), dtype=np.float32)
-                        v = np.empty((97,), dtype=np.float32)
-
-                        logger.log_highload(H_DEBUG_LOGS_PATH,
-                                            'Receiving metadata from {0}'.format(cont_env[i]))
-                        comm.Recv(data, source=cont_env[i], tag=13)
-                        logger.log_highload(H_DEBUG_LOGS_PATH,
-                                            'Receiving vector field from {0}'.format(cont_env[i]))
-                        comm.Recv(vf, source=cont_env[i], tag=13)
-                        logger.log_highload(H_DEBUG_LOGS_PATH,
-                                            'Receiving vector from {0}'.format(cont_env[i]))
-                        comm.Recv(v, source=cont_env[i], tag=13)
+                        data = np.empty((3 + ENV_MEMORY_SIZE * (11 * 11 * 2) + ENV_MEMORY_SIZE * 97), dtype=np.float32)
+                        comm.Sendrecv(actions[i].astype('float32'), dest=cont_env[i], sendtag=13, recvbuf=data,
+                                      source=cont_env[i], recvtag=13)
+                        metadata = data[:3]
+                        vf = np.reshape(data[3: 3 + ENV_MEMORY_SIZE * (11 * 11 * 2)], (11, 11, 2 * ENV_MEMORY_SIZE))
+                        v = data[3 + ENV_MEMORY_SIZE * (11 * 11 * 2):]
 
                         observations[cont_env[i] - 1] = (vf, v)
                         rewards[cont_env[i] - 1] += data[0]
-                        logger.log_highload(H_DEBUG_LOGS_PATH,
-                                            'Writing obs to replay buffer {0}'.format(cont_env[i]))
 
                         manager.append_observations(
                             (*old_observations[cont_env[i] - 1], data[1], vf, v,
@@ -166,13 +156,10 @@ else:
         elif data == 1:
             action = np.empty(22, dtype=np.float32)
             comm.Recv(action, source=0, tag=13)
-            observation, reward, done, info = env.step(action)
+            observation, reward, done, info = env.step(action, obs_as_single_vector=True)
             metadata = np.array([float(reward), float(done), float(rank)], dtype=np.float32)
-            d = np.ascontiguousarray(metadata, dtype=np.float32)
-            vf = np.ascontiguousarray(observation[0], dtype=np.float32)
-            v = np.ascontiguousarray(observation[1], dtype=np.float32)
+            data = np.concatenate([metadata, observation], axis=-1)
+            d = np.ascontiguousarray(data, dtype=np.float32)
             comm.Send(d, dest=0, tag=13)
-            comm.Send(vf, dest=0, tag=13)
-            comm.Send(v, dest=0, tag=13)
         elif data == 2:
             break
