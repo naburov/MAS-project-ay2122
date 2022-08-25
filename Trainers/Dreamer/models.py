@@ -9,11 +9,12 @@ from collections import namedtuple
 import numpy as np
 
 # heavily relies on https://github.com/danijar/dreamer
+from config import DENSE_DECODER_NOISE, GRAD_CLIP_NORM
 
 State = namedtuple('State', 'mean std deter stoch')
 
 NUM_ACTIONS = 22
-VECTOR_OBS=97
+VECTOR_OBS = 97
 
 
 class TanhBijector(tfp.bijectors.Bijector):
@@ -94,6 +95,7 @@ class ActionDecoder:
 
     def backward(self, optimizer: tf.keras.optimizers.Optimizer, tape: tf.GradientTape, loss):
         grads = tape.gradient(loss, self.model.trainable_weights)
+        grads = [tf.clip_by_norm(g, GRAD_CLIP_NORM) for g in grads]
         optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
 
     def __call__(self, s: tf.Tensor) -> SampleDist:
@@ -126,12 +128,25 @@ class EnvDecoder:
         e = tf.keras.layers.Dense(units, activation=tf.nn.relu)(embedding_input)
         conv_branch = tf.keras.layers.Dense(units=units, activation=tf.nn.relu)(e)
         conv_branch = tf.keras.layers.Dense(units=units, activation=tf.nn.relu)(conv_branch)
-        conv_branch = tf.keras.layers.Dense(units=11 * 11 * conv_filters, activation=tf.nn.relu)(conv_branch)
-        conv_branch = tf.keras.layers.Reshape(target_shape=(11, 11, conv_filters))(conv_branch)
-        conv_branch = tf.keras.layers.Conv2D(conv_filters, 1, padding='same', activation=tf.nn.relu)(conv_branch)
-        conv_branch = tf.keras.layers.Conv2D(conv_filters, 1, padding='same', activation=tf.nn.relu)(conv_branch)
+        conv_branch = tf.keras.layers.Reshape(target_shape=(1, 1, units))(conv_branch)
+        conv_branch = tf.keras.layers.Conv2DTranspose(conv_filters * 4, 1, strides=(1, 1), padding='same',
+                                                      activation=tf.nn.relu)(
+            conv_branch)
+        conv_branch = tf.keras.layers.Conv2DTranspose(conv_filters * 2, 5, strides=(2, 2), padding='same',
+                                                      activation=tf.nn.relu)(
+            conv_branch)
+        conv_branch = tf.keras.layers.Conv2DTranspose(conv_filters * 2, 5, strides=(2, 2), padding='same',
+                                                      activation=tf.nn.relu)(
+            conv_branch)
+        conv_branch = tf.keras.layers.Conv2DTranspose(conv_filters * 2, 5, strides=(2, 2), padding='same',
+                                                      activation=tf.nn.relu)(
+            conv_branch)
+        conv_branch = tf.keras.layers.Conv2DTranspose(conv_filters * 2, 5, strides=(2, 2), padding='same',
+                                                      activation=tf.nn.relu)(
+            conv_branch)
         tgt_field_output = tf.keras.layers.Conv2D(2 * env_memory_size, 1, padding='same', activation=None)(
             conv_branch)
+        tgt_field_output = tf.keras.layers.Lambda(lambda image: tf.image.resize(image, (11, 11)))(tgt_field_output)
 
         x = tf.keras.layers.Dense(units, activation=tf.nn.relu)(embedding_input)
         x = tf.keras.layers.Dense(units, activation=tf.nn.relu)(x)
@@ -141,11 +156,14 @@ class EnvDecoder:
 
         return tf.keras.Model(inputs=[embedding_input], outputs=[tgt_field_output, vector_output])
 
-    def __init__(self, env_memory_size, emb_size, units, conv_filters):
+    def __init__(self, env_memory_size, emb_size, units, conv_filters, vf_std, v_std):
         self.model = self.get_model(emb_size, env_memory_size, units, conv_filters)
+        self.vf_std = vf_std
+        self.v_std = v_std
 
     def backward(self, optimizer: tf.keras.optimizers.Optimizer, tape: tf.GradientTape, loss):
         grads = tape.gradient(loss, self.model.trainable_weights)
+        grads = [tf.clip_by_norm(g, GRAD_CLIP_NORM) for g in grads]
         optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
 
     def __call__(self, data: tf.Tensor) -> Tuple[tfd.Distribution, tfd.Distribution]:
@@ -157,8 +175,8 @@ class EnvDecoder:
                                                                                                *res[1].shape[1:]))
         else:
             res = self.model(data)
-        return tfd.Independent(tfd.Normal(res[0], 1), len(res[0].shape)), \
-               tfd.Independent(tfd.Normal(res[1], 1), len(res[1].shape))
+        return tfd.Independent(tfd.Normal(res[0], self.vf_std), len(res[0].shape)), \
+               tfd.Independent(tfd.Normal(res[1], self.v_std), len(res[1].shape))
 
     def save(self, checkpoint_dir, name):
         self.model.save(
@@ -177,7 +195,7 @@ class EnvEncoder:
         vector_input = tf.keras.Input(shape=(VECTOR_OBS * env_memory_size,))
 
         cv_kwargs = {
-            'strides': 1, 'padding': 'same', 'activation': tf.nn.relu
+            'strides': 1, 'padding': 'same', 'activation': tf.nn.elu
         }
         conv_branch = tf.keras.layers.Conv2D(conv_filters, 3, **cv_kwargs)(tgt_inputs)
         conv_branch = tf.keras.layers.Conv2D(conv_filters * 2, 3, **cv_kwargs)(conv_branch)
@@ -198,6 +216,7 @@ class EnvEncoder:
 
     def backward(self, optimizer: tf.keras.optimizers.Optimizer, tape: tf.GradientTape, loss):
         grads = tape.gradient(loss, self.model.trainable_weights)
+        grads = [tf.clip_by_norm(g, GRAD_CLIP_NORM) for g in grads]
         optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
 
     def __call__(self, data: Tuple[tf.Tensor, tf.Tensor]) -> tf.Tensor:
@@ -222,14 +241,16 @@ class EnvEncoder:
 
 
 class DenseDecoder:
-    def __init__(self, inp, units, out_size):
+    def __init__(self, inp, units, out_size, std):
         self.model = tf.keras.models.Sequential([
             tfkl.Input(shape=(inp,)),
             tfkl.Dense(units, tf.nn.elu),
             tfkl.Dense(units, tf.nn.elu),
             tfkl.Dense(units, tf.nn.elu),
+            tfkl.Dense(units, tf.nn.elu),
             tfkl.Dense(out_size)
         ])
+        self.std = std
 
     def __call__(self, features: tf.Tensor) -> tfp.distributions.Distribution:
         if len(features.shape) == 3:
@@ -239,10 +260,11 @@ class DenseDecoder:
             res = tf.reshape(res, (time_steps, -1, *res.shape[1:]))
         else:
             res = self.model(features)
-        return tfd.Independent(tfd.Normal(res, 1), len(()))
+        return tfd.Independent(tfd.Normal(res, self.std), len(()))
 
     def backward(self, optimizer: tf.keras.optimizers.Optimizer, tape: tf.GradientTape, loss):
         grads = tape.gradient(loss, self.model.trainable_weights)
+        grads = [tf.clip_by_norm(g, GRAD_CLIP_NORM) for g in grads]
         optimizer.apply_gradients(zip(grads, self.model.trainable_weights))
 
     def save(self, checkpoint_dir, name):
@@ -291,9 +313,11 @@ class RSSM:
 
     def backward(self, optimizer: tf.keras.optimizers.Optimizer, tape: tf.GradientTape, loss):
         grads = tape.gradient(loss, self.prior_model.trainable_weights)
+        grads = [tf.clip_by_norm(g, GRAD_CLIP_NORM) for g in grads]
         optimizer.apply_gradients(zip(grads, self.prior_model.trainable_weights))
 
         grads = tape.gradient(loss, self.post_model.trainable_weights)
+        grads = [tf.clip_by_norm(g, GRAD_CLIP_NORM) for g in grads]
         optimizer.apply_gradients(zip(grads, self.post_model.trainable_weights))
 
     def get_prior_model(self, hid, d_size, action_shape, stoch_shape) -> tf.keras.Model:
@@ -350,7 +374,7 @@ class RSSM:
 
         return prior, post
 
-    @tf.function
+    # @tf.function
     def posterior(self, prev_state: State, prev_action, env_embedding) -> Tuple[State, State]:
         prior = self.prior(prev_state, prev_action)
         x = self.post_model((prior.deter, env_embedding))
@@ -362,7 +386,7 @@ class RSSM:
         )
         return prior, post
 
-    @tf.function
+    # @tf.function
     def prior(self, prev_state: State, prev_action) -> State:
         x, det = self.prior_model((prev_state.deter, prev_state.stoch, prev_action))
         mean, std = tf.split(x, 2, -1)

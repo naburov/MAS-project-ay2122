@@ -213,7 +213,7 @@ class DenseDecoder:
             res = tf.reshape(res, (time_steps, -1, *res.shape[1:]))
         else:
             res = self.model(features)
-        return tfd.Independent(tfd.Normal(res, 1), len(()))
+        return tfd.Independent(tfd.Normal(res, 0.1), len(()))
 
     def backward(self, optimizer: tf.keras.optimizers.Optimizer, tape: tf.GradientTape, loss):
         grads = tape.gradient(loss, self.model.trainable_weights)

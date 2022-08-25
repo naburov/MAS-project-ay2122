@@ -92,9 +92,6 @@ class Dreamer:
             imag_feat = self.imagine_ahead(post)
             reward = self.reward_model(imag_feat).mode()
             value = self.value_model(imag_feat).mode()
-            # reward = self.reward_model(imag_feat)
-            # value = self.value_model(imag_feat)
-
             gamma_discount = tf.fill((value.shape[0] - 1, *value.shape[1:]), gamma)
             start_col = tf.ones((1, *value.shape[1:]))
             gamma_discount = tf.concat([start_col, gamma_discount], axis=0)

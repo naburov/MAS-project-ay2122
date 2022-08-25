@@ -27,7 +27,8 @@ manager = DreamerTrainManager(checkpoint_dir=MODEL_CHECKPOINT_DIR,
 logger = Logger(100)
 print('Loaded: ', manager.buf.num_sequences, ' sequences')
 train_steps = 25
-env = MyEnv(visualize=True, memory_size=ENV_MEMORY_SIZE)
+env = MyEnv(visualize=True, memory_size=ENV_MEMORY_SIZE, integrator_accuracy=INTEGRATOR_ACCURACY)
+
 for epoch in range(EPOCHS):
     rewards = []
     for num_episode in range(EPISODES_PER_EPOCH):
@@ -43,7 +44,7 @@ for epoch in range(EPOCHS):
         r = 0
         it_count = 0
         while not done:
-            if it_count % 2 == 0:
+            if it_count % N_REPEAT_ACIONS == 0:
                 if is_random:
                     actions = [env.action_space.sample()]
                 else:
@@ -54,8 +55,8 @@ for epoch in range(EPOCHS):
             observation, reward, done, info = env.step(actions[0])
             r += reward
             manager.append_observations(
-                (*old_observations, reward, *observation, actions[0]),  1)
-
+                (*old_observations, reward, *observation, actions[0]), 1)
+        print(it_count)
         manager.on_episode_end(epoch, num_episode)
         print('Finished episode ', num_episode)
         rewards.append(r)

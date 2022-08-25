@@ -28,7 +28,7 @@ manager = DreamerPendulumTrainManager(checkpoint_dir=MODEL_CHECKPOINT_DIR,
                                       buffer_capacity=BUFFER_CAPACITY,
                                       num_ranks=2,
                                       batch_size=BATCH_SIZE)
-logger = Logger()
+logger = Logger(100)
 print('Loaded: ', manager.buf.num_sequences, ' sequences')
 
 env = gym.make('Pendulum-v1', g=9.81)
@@ -62,7 +62,7 @@ for epoch in range(EPOCHS):
             # reward = max(-1, min(reward, 1))
             r += reward
             manager.append_observations(
-                (old_observations, reward, observation, actions[0]), {'rank': 1})
+                (old_observations, reward, observation, actions[0]),  1)
 
         manager.on_episode_end(epoch, num_episode)
         print('Finished episode ', num_episode)

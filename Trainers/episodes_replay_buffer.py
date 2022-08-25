@@ -37,7 +37,7 @@ class EpisodeReplayBuffer:
         if self.sequences[self.active_indices[rank - 1]] is None:
             self.sequences[self.active_indices[rank - 1]] = [observation]
         else:
-            self.sequences[self.active_indices[rank- 1]].append(observation)
+            self.sequences[self.active_indices[rank - 1]].append(observation)
 
     def sample_sequences(self, num_sequences):
         if num_sequences > self.num_sequences:
@@ -59,8 +59,10 @@ class EpisodeReplayBuffer:
         indices = np.random.choice(min(self.num_sequences - 1, self.capacity), num_sequences)
 
         for i in range(len(indices)):
-            start = random.randint(0, len(self.sequences[indices[i]]) - n_steps)
-            for j in range(start, start + n_steps):
+            l = min(n_steps, len(self.sequences[indices[i]]) - 1)
+            start = random.randint(0, len(self.sequences[indices[i]]) - l)
+            print(l)
+            for j in range(start, start + l):
                 o = self.sequences[indices[i]][j]
                 vf_state_buffer[j - start, i] = o[0]
                 vector_state_bufffer[j - start, i] = o[1]

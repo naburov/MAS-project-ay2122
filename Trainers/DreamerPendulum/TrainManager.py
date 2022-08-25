@@ -51,3 +51,6 @@ class DreamerPendulumTrainManager(TrainManager):
 
     def append_observations(self, data, info):
         self.buf.append(data, info)
+
+    def get_initial_observation(self):
+        return np.zeros((3,))

@@ -28,7 +28,7 @@ def observation2tensors(observation):
 
 
 class MyEnv(L2M2019Env):
-    def __init__(self, *args, memory_size=5, visualize=True, integrator_accuracy=5e-5, difficulty=3, seed=None,
+    def __init__(self, *args, memory_size=5, visualize=True, integrator_accuracy=3e-2, difficulty=3, seed=None,
                  report=None, **kwargs):
         super(MyEnv, self).__init__(visualize=visualize, integrator_accuracy=integrator_accuracy,
                                     difficulty=difficulty, seed=seed,

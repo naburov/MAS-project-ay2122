@@ -1,5 +1,6 @@
 from Trainers.DDPGTrainManager.logger import Logger
 from Trainers.Dreamer.DreamerV1 import Dreamer
+# from Trainers.episodes_replay_buffer_numpy import EpisodeReplayBufferNumpy as ReplayBuffer
 from Trainers.episodes_replay_buffer import EpisodeReplayBuffer as ReplayBuffer
 from Trainers.Trainer import TrainManager
 import os

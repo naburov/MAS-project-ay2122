@@ -5,11 +5,6 @@ import tensorflow as tf
 import pickle
 
 
-# TGT_FIELD_SHAPE = (11, 11)
-# VECTOR_OBS_LEN = 119
-# NUM_ACTIONS = 22
-
-
 class EpisodeReplayBuffer:
     def __init__(self, seq_capacity, num_ranks, env_memory_size):
         self.capacity = int(np.ceil(seq_capacity / (num_ranks - 1))) * (num_ranks - 1)
@@ -31,17 +26,14 @@ class EpisodeReplayBuffer:
         for id in self.active_indices:
             self.sequences[id] = None
 
-        # print('Active indices ', self.active_indices, ' Num sequences ', self.num_sequences)
-
     def finish_episode(self, num_ranks):
         self.num_sequences = max(0, min(self.num_sequences + num_ranks - 1, self.capacity))
 
-    def append(self, observation, info):
-        # print(len(self.sequences), info['rank'] - 1, self.active_indices, self.capacity)
-        if self.sequences[self.active_indices[info['rank'] - 1]] is None:
-            self.sequences[self.active_indices[info['rank'] - 1]] = [observation]
+    def append(self, observation, rank):
+        if self.sequences[self.active_indices[rank - 1]] is None:
+            self.sequences[self.active_indices[rank - 1]] = [observation]
         else:
-            self.sequences[self.active_indices[info['rank'] - 1]].append(observation)
+            self.sequences[self.active_indices[rank - 1]].append(observation)
 
     def sample_sequences(self, num_sequences):
         if num_sequences > self.num_sequences:
@@ -56,10 +48,12 @@ class EpisodeReplayBuffer:
         next_state_buffer = np.zeros((n_steps, num_sequences, 3))
         if num_sequences > self.num_sequences:
             num_sequences = self.num_sequences
-        indices = np.random.choice(min(self.num_sequences - 1, self.capacity), num_sequences)
+
+        indices = np.random.choice(min(self.num_sequences - 1, self.capacity), num_sequences, replace=False)
+
         for i in range(len(indices)):
+            # print(self.sequences[indices[i]], indices, self.num_sequences - 1, self.capacity)
             start = random.randint(0, len(self.sequences[indices[i]]) - n_steps)
-            # old_observations, reward, observation, actions[0]
             for j in range(start, start + n_steps):
                 o = self.sequences[indices[i]][j]
                 state_buffer[j - start, i] = o[0]

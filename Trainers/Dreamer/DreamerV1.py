@@ -18,25 +18,27 @@ class Dreamer:
     def __init__(self, checkpoint_dir):
         self.encoder = EnvEncoder(env_memory_size, embedding_size, units, filters)
         self.dynamics_model = RSSM(stoch, determ, embedding_size, hidden)
-        self.reward_model = DenseDecoder(stoch + determ, units, 1)
-        self.value_model = DenseDecoder(stoch + determ, units, 1)
-        self.decoder_model = EnvDecoder(env_memory_size, stoch + determ, units, filters)
+        self.reward_model = DenseDecoder(stoch + determ, units, 1, REWARD_DENSE_DECODER_NOISE)
+        self.value_model = DenseDecoder(stoch + determ, units, 1, VALUE_DENSE_DECODER_NOISE)
+        self.decoder_model = EnvDecoder(env_memory_size, stoch + determ, units, filters, DECODER_VF_STD, DECODER_V_STD)
         self.action_model_1 = ActionDecoder(stoch + determ, num_actions // 2, units)
         self.action_model_2 = ActionDecoder(stoch + determ, num_actions // 2, units)
 
-        self.action_opt_1 = tf.keras.optimizers.Adam(1e-4)
-        self.action_opt_2 = tf.keras.optimizers.Adam(1e-4)
-        self.value_opt = tf.keras.optimizers.Adam(1e-4)
-        self.dynamics_opt = tf.keras.optimizers.Adam(1e-4)
-        self.reward_opt = tf.keras.optimizers.Adam(1e-4)
-        self.encoder_opt = tf.keras.optimizers.Adam(1e-4)
-        self.decoder_opt = tf.keras.optimizers.Adam(1e-4)
+        self.action_opt_1 = tf.keras.optimizers.Adam(ACTOR_LR)
+        self.action_opt_2 = tf.keras.optimizers.Adam(ACTOR_LR)
+        self.value_opt = tf.keras.optimizers.Adam(VALUE_LR)
+        self.dynamics_opt = tf.keras.optimizers.Adam(DYNAMICS_LR)
+        self.reward_opt = tf.keras.optimizers.Adam(REWARD_LR)
+        self.encoder_opt = tf.keras.optimizers.Adam(ENCODER_LR)
+        self.decoder_opt = tf.keras.optimizers.Adam(DECODER_LR)
+
+        self.decoder_model.model.summary()
 
         if len(os.listdir(checkpoint_dir)) > 0:
             print('Loading checkpoints from {0}'.format(checkpoint_dir))
             self.load_state(checkpoint_dir)
 
-    @tf.function
+    # @tf.function
     def policy(self, observations, state: State, prev_action: tf.Tensor, training=False):
         if state is None:
             latent = self.dynamics_model.initial_state(observations[0].shape[0])
@@ -45,7 +47,7 @@ class Dreamer:
             latent = state
             action = prev_action
         embedding = self.encoder(observations)
-        _, post = self.dynamics_model.posterior(latent, action, embedding)
+        prior, post = self.dynamics_model.posterior(latent, action, embedding)
         features = get_feat(post)
         if not training:
             action_1 = self.action_model_1(features).mode()
@@ -62,6 +64,7 @@ class Dreamer:
 
     def train_step(self, observations, actions, rewards):
         with tf.GradientTape(persistent=True) as model_tape:
+            # print(tf.reduce_mean(rewards))
             embed = self.encoder(observations)
             prior, post = self.dynamics_model.observe(embed, actions, state=None)
             feat = get_feat(post)
@@ -74,7 +77,7 @@ class Dreamer:
             prior_dist = get_dist(prior.mean, prior.std)
             post_dist = get_dist(post.mean, post.std)
             div = tf.reduce_mean(tfd.kl_divergence(post_dist, prior_dist))
-            model_loss = kl_scale * div - reconstruction_loss - reward_prob
+            model_loss = kl_scale * div - rec_scale * reconstruction_loss - rew_scale * reward_prob
 
         self.dynamics_model.backward(self.dynamics_opt, model_tape, model_loss)
         self.decoder_model.backward(self.decoder_opt, model_tape, model_loss)
@@ -175,10 +178,17 @@ class Dreamer:
         self.action_model_2.save(checkpoint_dir, 'action_2')
 
     def load_state(self, checkpoint_dir):
-        self.encoder.load(checkpoint_dir, 'encoder')
-        self.dynamics_model.load(checkpoint_dir, 'prior', 'post')
-        self.reward_model.load(checkpoint_dir, 'reward')
-        self.value_model.load(checkpoint_dir, 'value')
-        self.decoder_model.load(checkpoint_dir, 'decoder')
-        self.action_model_1.load(checkpoint_dir, 'action_1')
-        self.action_model_2.load(checkpoint_dir, 'action_2')
+        if os.path.exists(os.path.join(checkpoint_dir, 'encoder.h5')):
+            self.encoder.load(checkpoint_dir, 'encoder')
+        if os.path.exists(os.path.join(checkpoint_dir, 'prior.h5')):
+            self.dynamics_model.load(checkpoint_dir, 'prior', 'post')
+        if os.path.exists(os.path.join(checkpoint_dir, 'reward.h5')):
+            self.reward_model.load(checkpoint_dir, 'reward')
+        if os.path.exists(os.path.join(checkpoint_dir, 'value.h5')):
+            self.value_model.load(checkpoint_dir, 'value')
+        if os.path.exists(os.path.join(checkpoint_dir, 'decoder.h5')):
+            self.decoder_model.load(checkpoint_dir, 'decoder')
+        if os.path.exists(os.path.join(checkpoint_dir, 'action_1.h5')):
+            self.action_model_1.load(checkpoint_dir, 'action_1')
+        if os.path.exists(os.path.join(checkpoint_dir, 'action_2.h5')):
+            self.action_model_2.load(checkpoint_dir, 'action_2')
