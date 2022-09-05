@@ -17,45 +17,42 @@ REWARD_LOGS_PATH = r'C:\Users\burov\Projects\mas-project-burov-ay2122\reward-dre
 LOSSES_LOGS_PATH = r'C:\Users\burov\Projects\mas-project-burov-ay2122\losses-dreamer.log'
 DEBUG_LOGS_PATH = r'C:\Users\burov\Projects\mas-project-burov-ay2122\debug-dreamer.log'
 H_DEBUG_LOGS_PATH = r'C:\Users\burov\Projects\mas-project-burov-ay2122\current-debug-dreamer.log'
-PRETRAIN_STEPS = 0
+
+VALUE_DENSE_DECODER_NOISE = 0.1
+REWARD_DENSE_DECODER_NOISE = 0.05
 DENSE_DECODER_NOISE = 1.0
-VALUE_DENSE_DECODER_NOISE = 0.25
-REWARD_DENSE_DECODER_NOISE = 0.1
 ACTOR_NOISE = 0.1
+GRAD_CLIP_NORM = 50.0
+PRETRAIN_STEPS = 1000
 DECODER_VF_STD = 0.5
 DECODER_V_STD = 1.5
 
-GRAD_CLIP_NORM = 100.0
-
-ACTOR_LR = 1e-4
-ENCODER_LR = 5e-5
-DECODER_LR = 1e-5
+ACTOR_LR = 1e-3
 VALUE_LR = 1e-4
-DYNAMICS_LR = 2e-5
+DECODER_LR = 3e-5
+ENCODER_LR = 5e-5
+DYNAMICS_LR = 1e-4
 REWARD_LR = 1e-4
-INTEGRATOR_ACCURACY = 1e-2
-# MODEL_CHECKPOINT_DIR = r'/mnt/mas-project-burov-ay2122/checkpoints'
-# BUFFER_CHECKPOINT_DIR = r'/mnt/mas-project-burov-ay2122/buf.pckl'
-# REWARD_LOGS_PATH = '/mnt/mas-project-burov-ay2122/rewards.txt'
 
-N_REPEAT_ACIONS = 5
-BUF_SAVE_TIMEOUT = 3
+INTEGRATOR_ACCURACY = 1e-3
+N_REPEAT_ACIONS = 4
+BUF_SAVE_TIMEOUT = 10
 
 # net params
-hidden = 384
-determ = 200
-stoch = 30
-units = 1000
+hidden = 100
+determ = 100
+stoch = 15
+units = 400
 num_actions = 22
 
-kl_scale = 1.0
-rec_scale = 1.0
-rew_scale = 1.0
+kl_scale = 5.0
+rec_scale = 1e-4
+rew_scale = 10.0
 
 gamma = 0.99
 lambda_ = 0.95
 horizon = 10
 env_memory_size = 1
 embedding_size = 128
-filters = 48
-noise = 0.1
+filters = 32
+noise = 0.2

@@ -46,6 +46,13 @@ class EpisodeReplayBuffer:
         return [self.sequences[i] for i in indices]
 
     def sample_sequences_tensors(self, num_sequences, n_steps, convert_to_tf_tensors=False):
+        if num_sequences > self.num_sequences:
+            num_sequences = self.num_sequences
+
+        indices = np.random.choice(min(self.num_sequences - 1, self.capacity), num_sequences)
+        lens = [len(self.sequences[indices[i]]) for i in range(len(indices))]
+        n_steps = min(min(lens), n_steps)
+
         vf_state_buffer = np.zeros((n_steps, num_sequences, *TGT_FIELD_SHAPE, self.env_memory_size * 2))
         vector_state_bufffer = np.zeros((n_steps, num_sequences, VECTOR_OBS_LEN * self.env_memory_size))
         action_buffer = np.zeros((n_steps, num_sequences, NUM_ACTIONS))
@@ -53,16 +60,9 @@ class EpisodeReplayBuffer:
         next_vf_state_buffer = np.zeros((n_steps, num_sequences, *TGT_FIELD_SHAPE, self.env_memory_size * 2))
         next_vector_state_bufffer = np.zeros((n_steps, num_sequences, VECTOR_OBS_LEN * self.env_memory_size))
 
-        if num_sequences > self.num_sequences:
-            num_sequences = self.num_sequences
-
-        indices = np.random.choice(min(self.num_sequences - 1, self.capacity), num_sequences)
-
         for i in range(len(indices)):
-            l = min(n_steps, len(self.sequences[indices[i]]) - 1)
-            start = random.randint(0, len(self.sequences[indices[i]]) - l)
-            print(l)
-            for j in range(start, start + l):
+            start = random.randint(0, len(self.sequences[indices[i]]) - n_steps)
+            for j in range(start, start + n_steps):
                 o = self.sequences[indices[i]][j]
                 vf_state_buffer[j - start, i] = o[0]
                 vector_state_bufffer[j - start, i] = o[1]

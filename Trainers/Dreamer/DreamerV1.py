@@ -53,6 +53,7 @@ class Dreamer:
             action_1 = self.action_model_1(features).mode()
             action_2 = self.action_model_2(features).mode()
             action = tf.concat([action_1, action_2], axis=-1)
+            action = (action + 1.0) / 2
         else:
             action_1 = self.action_model_1(features).sample()
             action_2 = self.action_model_2(features).sample()
@@ -64,7 +65,6 @@ class Dreamer:
 
     def train_step(self, observations, actions, rewards):
         with tf.GradientTape(persistent=True) as model_tape:
-            # print(tf.reduce_mean(rewards))
             embed = self.encoder(observations)
             prior, post = self.dynamics_model.observe(embed, actions, state=None)
             feat = get_feat(post)
@@ -144,10 +144,10 @@ class Dreamer:
             return a
 
         state = State(
-            mean=tf.reshape(post.mean, (-1, stoch)),
-            std=tf.reshape(post.std, (-1, stoch)),
-            stoch=tf.reshape(post.stoch, (-1, stoch)),
-            deter=tf.reshape(post.deter, (-1, determ)),
+            mean=tf.reshape(post.mean[:-horizon], (-1, stoch)),
+            std=tf.reshape(post.std[:-horizon], (-1, stoch)),
+            stoch=tf.reshape(post.stoch[:-horizon], (-1, stoch)),
+            deter=tf.reshape(post.deter[:-horizon], (-1, determ)),
         )
 
         prior_states = []

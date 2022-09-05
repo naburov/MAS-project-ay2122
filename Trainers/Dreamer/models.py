@@ -86,11 +86,11 @@ class ActionDecoder:
 
         self.model = tf.keras.models.Sequential([
             tfkl.Input(shape=(inp,)),
-            tfkl.Dense(units, tf.nn.elu),
-            tfkl.Dense(units, tf.nn.elu),
-            tfkl.Dense(units, tf.nn.elu),
-            tfkl.Dense(units, tf.nn.elu),
-            tfkl.Dense(2 * size)
+            tfkl.Dense(units, tf.nn.elu, kernel_regularizer='l1_l2'),
+            tfkl.Dense(units, tf.nn.elu, kernel_regularizer='l1_l2'),
+            tfkl.Dense(units, tf.nn.elu, kernel_regularizer='l1_l2'),
+            tfkl.Dense(units, tf.nn.elu, kernel_regularizer='l1_l2'),
+            tfkl.Dense(2 * size,  kernel_regularizer='l1_l2')
         ])
 
     def backward(self, optimizer: tf.keras.optimizers.Optimizer, tape: tf.GradientTape, loss):
@@ -130,28 +130,34 @@ class EnvDecoder:
         conv_branch = tf.keras.layers.Dense(units=units, activation=tf.nn.relu)(conv_branch)
         conv_branch = tf.keras.layers.Reshape(target_shape=(1, 1, units))(conv_branch)
         conv_branch = tf.keras.layers.Conv2DTranspose(conv_filters * 4, 1, strides=(1, 1), padding='same',
+                                                      kernel_regularizer='l2',
                                                       activation=tf.nn.relu)(
             conv_branch)
         conv_branch = tf.keras.layers.Conv2DTranspose(conv_filters * 2, 5, strides=(2, 2), padding='same',
+                                                      kernel_regularizer='l2',
                                                       activation=tf.nn.relu)(
             conv_branch)
         conv_branch = tf.keras.layers.Conv2DTranspose(conv_filters * 2, 5, strides=(2, 2), padding='same',
+                                                      kernel_regularizer='l2',
                                                       activation=tf.nn.relu)(
             conv_branch)
         conv_branch = tf.keras.layers.Conv2DTranspose(conv_filters * 2, 5, strides=(2, 2), padding='same',
+                                                      kernel_regularizer='l2',
                                                       activation=tf.nn.relu)(
             conv_branch)
         conv_branch = tf.keras.layers.Conv2DTranspose(conv_filters * 2, 5, strides=(2, 2), padding='same',
+                                                      kernel_regularizer='l2',
                                                       activation=tf.nn.relu)(
             conv_branch)
-        tgt_field_output = tf.keras.layers.Conv2D(2 * env_memory_size, 1, padding='same', activation=None)(
+        tgt_field_output = tf.keras.layers.Conv2D(2 * env_memory_size, 1, padding='same', kernel_regularizer='l2',
+                                                  activation=None)(
             conv_branch)
         tgt_field_output = tf.keras.layers.Lambda(lambda image: tf.image.resize(image, (11, 11)))(tgt_field_output)
 
-        x = tf.keras.layers.Dense(units, activation=tf.nn.relu)(embedding_input)
-        x = tf.keras.layers.Dense(units, activation=tf.nn.relu)(x)
-        x = tf.keras.layers.Dense(units, activation=tf.nn.relu)(x)
-        x = tf.keras.layers.Dense(units, activation=tf.nn.relu)(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.relu, kernel_regularizer='l2')(embedding_input)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.relu, kernel_regularizer='l2')(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.relu, kernel_regularizer='l2')(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.relu, kernel_regularizer='l2')(x)
         vector_output = tf.keras.layers.Dense(units=VECTOR_OBS * env_memory_size)(x)
 
         return tf.keras.Model(inputs=[embedding_input], outputs=[tgt_field_output, vector_output])
@@ -195,17 +201,17 @@ class EnvEncoder:
         vector_input = tf.keras.Input(shape=(VECTOR_OBS * env_memory_size,))
 
         cv_kwargs = {
-            'strides': 1, 'padding': 'same', 'activation': tf.nn.elu
+            'strides': 1, 'padding': 'same', 'activation': tf.nn.elu, 'kernel_regularizer': 'l1_l2'
         }
         conv_branch = tf.keras.layers.Conv2D(conv_filters, 3, **cv_kwargs)(tgt_inputs)
         conv_branch = tf.keras.layers.Conv2D(conv_filters * 2, 3, **cv_kwargs)(conv_branch)
         conv_branch = tf.keras.layers.Conv2D(conv_filters * 4, 3, **cv_kwargs)(conv_branch)
         conv_vector = tf.keras.layers.GlobalAveragePooling2D()(conv_branch)
 
-        x = tf.keras.layers.Dense(units, activation=tf.nn.elu)(vector_input)
-        x = tf.keras.layers.Dense(units, activation=tf.nn.elu)(x)
-        x = tf.keras.layers.Dense(units, activation=tf.nn.elu)(x)
-        x = tf.keras.layers.Dense(units, activation=tf.nn.elu)(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.elu, kernel_regularizer='l1_l2')(vector_input)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.elu, kernel_regularizer='l1_l2')(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.elu, kernel_regularizer='l1_l2')(x)
+        x = tf.keras.layers.Dense(units, activation=tf.nn.elu, kernel_regularizer='l1_l2')(x)
         concated = tf.keras.layers.Concatenate()([x, conv_vector])
 
         out = tf.keras.layers.Dense(out_size, activation=tf.nn.relu)(concated)
@@ -244,10 +250,10 @@ class DenseDecoder:
     def __init__(self, inp, units, out_size, std):
         self.model = tf.keras.models.Sequential([
             tfkl.Input(shape=(inp,)),
-            tfkl.Dense(units, tf.nn.elu),
-            tfkl.Dense(units, tf.nn.elu),
-            tfkl.Dense(units, tf.nn.elu),
-            tfkl.Dense(units, tf.nn.elu),
+            tfkl.Dense(units, tf.nn.elu, kernel_regularizer='l1_l2'),
+            tfkl.Dense(units, tf.nn.elu, kernel_regularizer='l1_l2'),
+            tfkl.Dense(units, tf.nn.elu, kernel_regularizer='l1_l2'),
+            tfkl.Dense(units, tf.nn.elu, kernel_regularizer='l1_l2'),
             tfkl.Dense(out_size)
         ])
         self.std = std
@@ -327,8 +333,8 @@ class RSSM:
         x = tfkl.Concatenate(axis=-1)([stoch_inputs, act_inputs])
         x = tfkl.Dense(hid, tf.nn.elu, name='prior0')(x)
         x, det_tensor = tfkl.GRUCell(d_size, name='cell')(x, det_inputs)
-        x = tfkl.Dense(hid, tf.nn.elu, name='prior1')(x)
-        x = tfkl.Dense(hid, tf.nn.elu, name='prior2')(x)
+        x = tfkl.Dense(hid, tf.nn.elu, name='prior1', kernel_regularizer='l1_l2')(x)
+        x = tfkl.Dense(hid, tf.nn.elu, name='prior2', kernel_regularizer='l1_l2')(x)
         x = tfkl.Dense(2 * self.s_size)(x)
         return tf.keras.Model(inputs=[det_inputs, stoch_inputs, act_inputs], outputs=[x, det_tensor])
 
@@ -336,8 +342,8 @@ class RSSM:
         prior_inputs = tf.keras.Input(shape=deter_shape)
         env_inputs = tf.keras.Input(shape=env_shape)
         x = tfkl.Concatenate(axis=-1)([prior_inputs, env_inputs])
-        x = tfkl.Dense(hid, tf.nn.elu, name='post1')(x)
-        x = tfkl.Dense(hid, tf.nn.elu, name='post2')(x)
+        x = tfkl.Dense(hid, tf.nn.elu, name='post1', kernel_regularizer='l1_l2')(x)
+        x = tfkl.Dense(hid, tf.nn.elu, name='post2', kernel_regularizer='l1_l2')(x)
         x = tfkl.Dense(2 * self.s_size)(x)
         return tf.keras.Model(inputs=[prior_inputs, env_inputs], outputs=[x])
 
