@@ -16,7 +16,7 @@ As a baseline approach DreamerV1 was chosen.
 ## Installing the environment
 Prerequesties: 
 ```
-conda >= 3.6
+conda >= 5.3.1 # (python 3.6)
 mpi4py >=3.1.0
 ```
 To install the environment use the next command from the project directory: 
@@ -49,6 +49,6 @@ Problem with local training is MPI compatibility as it is OS and hardware depend
 
 ## Validating
 To check the perfomance of the model you should:
-1. Download final weights from *insert link to final weights* and store them to the single directory *dirname*
+1. Download final weights from [google drive folder](https://drive.google.com/drive/folders/15l626Dfau1rahLc7OHhJlFwEt2K5pqyL?usp=sharing) and store them to the single directory *dirname*
 2. Edit config file. Set MODEL_CHECKPOINT_DIR to the absolute path of the folder with checkpoints
 3. From the project directory run: ```python validate_dreamer.py ```
