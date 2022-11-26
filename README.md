@@ -1,6 +1,4 @@
-# mas-project-burov-ay2122
-
-## Learning to walk around [MAS Course Project ay2122]
+# Learning to walk around [MAS Course Project ay2122]
 
 This is the repo that contains code for training, deploying, and validating. 
 The project aims to solve the [task of walking around](http://osim-rl.kidzinski.com/docs/nips2019/) as a multi-agent system task.
