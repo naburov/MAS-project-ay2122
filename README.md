@@ -4,6 +4,8 @@ This is the repo that contains code for training, deploying, and validating.
 The project aims to solve the [task of walking around](http://osim-rl.kidzinski.com/docs/nips2019/) as a multi-agent system task.
 As a baseline approach DreamerV1 was chosen.
 
+The project was done during exchange mobility course in MultiAgentSystems in University of Bologna (spring term of 21/22 ay).
+
 <table>
   <tr>
     <td> <img src="./images/out2.gif"  alt="1" width = 360px height = 240px ></td>
